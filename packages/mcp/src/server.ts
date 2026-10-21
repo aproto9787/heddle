@@ -440,8 +440,9 @@ export class HeddleMcpServer {
 
     let timeout: NodeJS.Timeout | undefined;
     const capped = new Promise<undefined>((resolve) => {
+      // Keep this timer referenced: if the delegated task has no active handles,
+      // unref() lets Node exit before the synchronous wait cap resolves.
       timeout = setTimeout(() => resolve(undefined), syncWaitCapMs);
-      timeout.unref();
     });
 
     try {

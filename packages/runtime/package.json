@@ -38,7 +38,7 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
-    "test": "node --test dist/**/*.test.js"
+    "test": "node --test \"dist/**/*.test.js\""
   },
   "dependencies": {
     "@aproto9787/heddle-core": "workspace:^",
