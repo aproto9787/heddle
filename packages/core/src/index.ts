@@ -369,6 +369,13 @@ export interface LegacyMigrationResult {
   changed: boolean;
 }
 
+/** One human-readable legacy migration format shared by CLI, server, and tools. */
+export function formatLegacyMigrationNotes(notes: readonly LegacyMigrationNote[]): string[] {
+  return notes.map((note) =>
+    `${note.path}: ${note.from} -> ${note.to}: ${note.message}`,
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
