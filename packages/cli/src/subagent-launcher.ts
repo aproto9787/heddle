@@ -21,6 +21,7 @@ import {
 } from "@aproto9787/heddle-runtime";
 import { buildDelegationPrompt } from "./delegation-prompt.js";
 import { codexModelArgs } from "./codex-model-args.js";
+import { codexSecurityArgs } from "./codex-security-args.js";
 import { initialReport, isCompleteReport as isValidReport, recoverReport } from "./subagent-report.js";
 
 type Backend = "codex";
@@ -506,7 +507,7 @@ async function runBackend(args: CliArgs, reportPath: string): Promise<number> {
     "exec",
     "--json",
     ...codexModelArgs(args.model),
-    "--dangerously-bypass-approvals-and-sandbox",
+    ...codexSecurityArgs(false),
     "--skip-git-repo-check",
     "-",
   ];
