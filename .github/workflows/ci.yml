@@ -38,3 +38,16 @@ jobs:
         run: pnpm -r typecheck
       - name: Test
         run: pnpm -r test
+      - name: Verify Codex CLI 0.163.0 interface
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g @openai/codex@0.163.0
+          codex --version
+          codex exec --help > codex-exec-help.txt
+          for flag in --json --model --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox; do
+            if ! grep -Fq -- "$flag" codex-exec-help.txt; then
+              echo "::error::Codex 0.163.0 no longer exposes $flag"
+              exit 1
+            fi
+          done
