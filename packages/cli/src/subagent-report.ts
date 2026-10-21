@@ -8,9 +8,23 @@ export function isCompleteReport(report: string, name: string): boolean {
     return false;
   }
 
-  return /^status:\s*(done|blocked|needs_decision)\s*$/m.test(report)
-    && /^summary:\s*$/m.test(report)
-    && /^\s*-\s+\S/m.test(report);
+  // Only accept bullets in the summary section. A bullet under 'blockers'
+  // or 'artifacts' must not make an unfinished summary look complete.
+  const lines = report.split(/\r?\n/);
+  const hasStatus = lines.some((line) =>
+    /^status:[ \t]*(?:done|blocked|needs_decision)[ \t]*$/.test(line),
+  );
+  if (!hasStatus) return false;
+
+  const summaryIndex = lines.findIndex((line) => /^summary:[ \t]*$/.test(line));
+  if (summaryIndex < 0) return false;
+
+  for (const line of lines.slice(summaryIndex + 1)) {
+    if (!line.trim()) continue;
+    if (!/^[ \t]/.test(line)) break;
+    if (/^[ \t]+-[ \t]+\S/.test(line)) return true;
+  }
+  return false;
 }
 
 function compact(value: string, max = 240): string {
