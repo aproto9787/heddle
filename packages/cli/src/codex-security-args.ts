@@ -12,3 +12,12 @@ export function codexSecurityArgs(
     "--ask-for-approval", interactive ? "on-request" : "never",
   ];
 }
+
+/** Global sandbox/approval flags must precede the `exec` subcommand.
+ * Codex CLI 0.163.0 rejects `--ask-for-approval` when passed after `exec`.
+ */
+export function codexHeadlessExecPrefix(
+  env: { HEDDLE_CODEX_UNSAFE?: string } = process.env,
+): string[] {
+  return [...codexSecurityArgs(false, env), "exec"];
+}
