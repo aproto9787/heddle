@@ -91,3 +91,17 @@ test("recoverReport rejects incomplete Codex final message and uses diagnostic f
   assert.match(report, /^status: blocked\n/);
   assert.match(report, /reviewer did not write a valid REPORT file/);
 });
+
+test("isCompleteReport ignores bullets before the summary section", () => {
+  const report = [
+    "status: done",
+    "artifacts:",
+    "  - src/file.ts:2",
+    "summary:",
+    "blockers:",
+    "  - task was not actually summarized",
+    "",
+  ].join("\n");
+
+  assert.equal(isCompleteReport(report, "reviewer"), false);
+});
