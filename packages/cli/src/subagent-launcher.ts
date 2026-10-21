@@ -20,6 +20,7 @@ import {
   findAgentByName,
 } from "@aproto9787/heddle-runtime";
 import { buildDelegationPrompt } from "./delegation-prompt.js";
+import { codexModelArgs } from "./codex-model-args.js";
 import { initialReport, isCompleteReport as isValidReport, recoverReport } from "./subagent-report.js";
 
 type Backend = "codex";
@@ -279,8 +280,8 @@ function migrateAgentRecord(value: unknown): unknown {
     if (runtime.applyResources === undefined) runtime.applyResources = "prompt-only";
     if (runtime.delegationTransport === undefined) runtime.delegationTransport = "mcp";
     agent.runtime = runtime;
-    if (agent.model === undefined || (typeof agent.model === "string" && agent.model.startsWith("claude-"))) {
-      agent.model = "gpt-5.5";
+    if (typeof agent.model === "string" && agent.model.startsWith("claude-")) {
+      delete agent.model;
     }
   }
   if (Array.isArray(agent.agents)) {
@@ -499,13 +500,12 @@ async function runBackend(args: CliArgs, reportPath: string): Promise<number> {
     childEnv.CODEX_HOME = path.join(isolatedHome, ".codex");
     childEnv.CODEX_CONFIG_DIR = path.join(isolatedHome, ".codex");
   }
-  const model = args.model ?? "gpt-5.5";
   const prompt = buildCodexPrompt(args, reportPath, delegation);
   const command = "codex";
   const childArgs = [
     "exec",
     "--json",
-    "--model", model,
+    ...codexModelArgs(args.model),
     "--dangerously-bypass-approvals-and-sandbox",
     "--skip-git-repo-check",
     "-",
