@@ -111,6 +111,14 @@ MCP connects them with a traceable delegation boundary.
 - Phase-gated workflow policy: phase work can require `user-advocate` PASS before moving forward.
 - Debate routing policy: casual `debate`, `vs`, comparison, recommendation, or decision prompts can route through debater agents.
 
+## Codex execution permissions
+
+Heddle now launches local Codex processes in a `workspace-write` sandbox by default. Interactive leaders use `on-request` approval, while headless leaders and delegated workers use `never` approval (actions outside their sandbox are not automatically granted).
+
+If you deliberately run Heddle inside a separate, hardened VM/container and require the legacy unrestricted behavior, set `HEDDLE_CODEX_UNSAFE=1` in the Heddle process environment. This restores Codex's `--dangerously-bypass-approvals-and-sandbox` mode and is **unsafe on a normal workstation**.
+
+The sandbox guards Codex-command execution; it does not replace trust and security review for Heddle's own server, MCP tools, hooks or other external integrations.
+
 ## Codex model selection
 
 Heddle inherits the model from your local Codex configuration when a flow or role does not declare a `model`. This allows new Heddle runs to follow Codex model updates without requiring a Heddle release.

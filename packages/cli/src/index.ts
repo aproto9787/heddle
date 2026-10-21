@@ -16,6 +16,7 @@ import { runHeddleMcpServer } from "@aproto9787/heddle-mcp";
 import { buildConfiguredAgent } from "@aproto9787/heddle-runtime";
 import { createCodexInstructionHome, type CodexInstructionHome } from "./codex-home.js";
 import { codexModelArgs } from "./codex-model-args.js";
+import { codexHeadlessExecPrefix, codexSecurityArgs } from "./codex-security-args.js";
 import { buildDelegationPrompt } from "./delegation-prompt.js";
 import { buildHeadlessPrompt } from "./session-prompts.js";
 
@@ -439,7 +440,7 @@ function logMigrationNotes(scope: string, notes: string[]): void {
 }
 
 function buildSpawnArgs(agent: AgentConfig): { command: string; args: string[] } {
-  const args = ["--dangerously-bypass-approvals-and-sandbox", ...codexModelArgs(agent.model)];
+  const args = [...codexSecurityArgs(true), ...codexModelArgs(agent.model)];
   return { command: "codex", args };
 }
 
@@ -657,9 +658,8 @@ function resolveAgentFlowMd(flow: LoadedCliFlow, agent: AgentConfig): string | u
 
 function buildHeadlessSpawnArgs(agent: AgentConfig, finalInstructions: string, userPrompt: string, mcpConfigPath?: string): { command: string; args: string[] } {
   const args = [
-    "exec",
+    ...codexHeadlessExecPrefix(),
     "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
     "--skip-git-repo-check",
     ...codexModelArgs(agent.model),
   ];
