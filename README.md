@@ -121,9 +121,12 @@ To pin a model for a particular agent, add `model: your-model-id` to that agent 
 
 For a small setup, start with [`examples/simple-team.yaml`](examples/simple-team.yaml): one Codex leader, one implementer, and one reviewer. No roles, hooks, governance configuration or hard-coded model IDs are required.
 
+The example is currently available in the repository source; it will be included in npm distributions only after a new CLI release. From a source checkout with Codex installed:
+
 ```bash
-npm i -g @aproto9787/heddle
-heddle --flow examples/simple-team.yaml
+pnpm install --frozen-lockfile
+pnpm -r build
+node packages/cli/dist/index.js --flow examples/simple-team.yaml
 ```
 
 This flow is a minimal example; [`examples/leader-workers.yaml`](examples/leader-workers.yaml) remains available for advanced agent teams and governance policies. The intended v0.2 simplification is described in [the architecture plan](docs/V0_2_SIMPLIFICATION.md).
