@@ -31,7 +31,7 @@ jobs:
           node-version-file: .nvmrc
       # This repository does not currently commit a lockfile.
       - name: Install workspace dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
       - name: Build
         run: pnpm -r build
       - name: Typecheck
