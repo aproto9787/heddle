@@ -1,0 +1,18 @@
+# Smallest useful Heddle team; uses your current Codex model by default.
+name: Simple Team
+description: One leader delegates implementation and review to two workers.
+repo: .
+orchestrator:
+  name: leader
+  type: codex
+  system: |
+    Lead the task. Work directly on simple requests.
+    For separate implementation or review tasks, delegate using Heddle MCP tools.
+    Incorporate the reviewers' findings before reporting completion.
+  agents:
+    - name: implementer
+      type: codex
+      system: Implement the requested change and report concrete verification evidence.
+    - name: reviewer
+      type: codex
+      system: Review changes for correctness, regressions, and unmet requirements.

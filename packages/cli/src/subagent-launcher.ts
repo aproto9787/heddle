@@ -13,8 +13,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
-import * as HeddleCore from "@aproto9787/heddle-core";
-import type { AgentConfig, FlowDefinition } from "@aproto9787/heddle-core";
+import { migrateLegacyFlowDefinitionInput, type AgentConfig, type FlowDefinition } from "@aproto9787/heddle-core";
 import {
   buildConfiguredAgent,
   findAgentByName,
@@ -250,79 +249,6 @@ function mapCodexItem(item: Record<string, unknown>): MappedEvent | null {
 interface FlowContext {
   flow: FlowDefinition;
   selfAgent: AgentConfig;
-}
-
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function hasLegacyAgentType(value: unknown): boolean {
-  if (!value || typeof value !== "object") return false;
-  if ((value as { type?: unknown }).type === "claude-code") return true;
-  if (Array.isArray(value)) return value.some((entry) => hasLegacyAgentType(entry));
-  return Object.values(value as Record<string, unknown>).some((entry) => hasLegacyAgentType(entry));
-}
-
-function migrateAgentRecord(value: unknown): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const agent = { ...(value as Record<string, unknown>) };
-  if (agent.type === "claude-code") {
-    agent.type = "codex";
-  }
-  if (agent.type === "codex") {
-    const runtime = agent.runtime && typeof agent.runtime === "object"
-      ? { ...(agent.runtime as Record<string, unknown>) }
-      : {};
-    if (runtime.profile === undefined || runtime.profile === "claude-default") {
-      runtime.profile = "codex-default";
-    }
-    if (runtime.mode === undefined) runtime.mode = "host";
-    if (runtime.applyResources === undefined) runtime.applyResources = "prompt-only";
-    if (runtime.delegationTransport === undefined) runtime.delegationTransport = "mcp";
-    agent.runtime = runtime;
-    if (typeof agent.model === "string" && agent.model.startsWith("claude-")) {
-      delete agent.model;
-    }
-  }
-  if (Array.isArray(agent.agents)) {
-    agent.agents = agent.agents.map((child) => migrateAgentRecord(child));
-  }
-  return agent;
-}
-
-function migrateLegacyFlowDefinitionInput(value: unknown): { value: unknown; notes: string[] } {
-  if (!hasLegacyAgentType(value)) return { value, notes: [] };
-  const helper = (HeddleCore as Record<string, unknown>).migrateLegacyFlowDefinitionInput;
-  if (typeof helper === "function") {
-    try {
-      const migrated = helper(cloneJson(value)) as { value?: unknown; notes?: unknown };
-      const notes = Array.isArray(migrated.notes)
-        ? migrated.notes
-          .map((entry) => {
-            if (typeof entry === "string") return entry;
-            if (!entry || typeof entry !== "object") return "";
-            const note = entry as { path?: unknown; from?: unknown; to?: unknown; message?: unknown };
-            const pathLabel = typeof note.path === "string" ? note.path : "legacy";
-            const from = typeof note.from === "string" ? note.from : undefined;
-            const to = typeof note.to === "string" ? note.to : undefined;
-            const message = typeof note.message === "string" ? note.message : undefined;
-            return [pathLabel, from && to ? `${from} -> ${to}` : undefined, message].filter(Boolean).join(": ");
-          })
-          .filter((entry) => entry.trim().length > 0)
-        : [];
-      return {
-        value: migrated.value ?? migrated,
-        notes: notes.length > 0 ? notes : ["core legacy migration helper applied"],
-      };
-    } catch {
-      // Fall through to the local compatibility migration.
-    }
-  }
-  const flow = { ...(value as Record<string, unknown>) };
-  if (flow.orchestrator) {
-    flow.orchestrator = migrateAgentRecord(flow.orchestrator);
-  }
-  return { value: flow, notes: ["core legacy migration helper unavailable; applied built-in Codex migration"] };
 }
 
 async function loadFlowContext(selfName: string): Promise<FlowContext | undefined> {

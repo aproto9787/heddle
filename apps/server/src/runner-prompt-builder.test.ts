@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AgentConfig, FlowDefinition, RoleDefinition } from "@aproto9787/heddle-core";
-import { buildAgentPrompt, buildConfiguredAgent } from "./runner-prompt-builder.js";
-import type { RunResources } from "./runner-resource-loader.js";
+import { buildAgentPrompt, buildConfiguredAgent } from "@aproto9787/heddle-runtime";
+import type { RunResources } from "@aproto9787/heddle-runtime";
 
 const flow: FlowDefinition = {
   name: "demo",

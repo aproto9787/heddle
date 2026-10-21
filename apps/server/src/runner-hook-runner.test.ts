@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AgentConfig } from "@aproto9787/heddle-core";
-import { runHooks } from "./runner-hook-runner.js";
-import type { RunResources } from "./runner-resource-loader.js";
+import { runHooks } from "@aproto9787/heddle-runtime";
+import type { RunResources } from "@aproto9787/heddle-runtime";
 
 test("runHooks executes matching hooks and ignores missing ones", async () => {
   const originalEnv = process.env.HEDDLE_HOOK_RUNNER_TEST;

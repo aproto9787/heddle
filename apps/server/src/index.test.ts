@@ -819,3 +819,21 @@ heddleTest("PUT /flows/save rejects invalid recursive flow bodies and bad paths"
   assert.equal(nonYamlResponse.statusCode, 400);
   assert.match(JSON.stringify(nonYamlResponse.json().error), /\.yaml/);
 });
+
+heddleTest("GET /flows/get validates the minimal two-worker example", async (t) => {
+  const app = createTestApp(t);
+  const response = await app.inject({
+    method: "GET",
+    url: "/flows/get",
+    query: { path: "examples/simple-team.yaml" },
+  });
+  assert.equal(response.statusCode, 200);
+  const body = response.json();
+  assert.equal(body.flow.name, "Simple Team");
+  assert.equal(body.flow.orchestrator.type, "codex");
+  assert.deepEqual(body.flow.orchestrator.agents.map((agent: { name: string }) => agent.name), [
+    "implementer",
+    "reviewer",
+  ]);
+  assert.equal(body.flow.orchestrator.model, undefined);
+});

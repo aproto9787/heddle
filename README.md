@@ -117,6 +117,17 @@ Heddle inherits the model from your local Codex configuration when a flow or rol
 
 To pin a model for a particular agent, add `model: your-model-id` to that agent in the flow YAML. An explicit model always takes precedence. Existing flows with a model pinned (for example, `gpt-5.5`) retain that override until you remove or change it.
 
+## Quick start: two-worker team
+
+For a small setup, start with [`examples/simple-team.yaml`](examples/simple-team.yaml): one Codex leader, one implementer, and one reviewer. No roles, hooks, governance configuration or hard-coded model IDs are required.
+
+```bash
+npm i -g @aproto9787/heddle
+heddle --flow examples/simple-team.yaml
+```
+
+This flow is a minimal example; [`examples/leader-workers.yaml`](examples/leader-workers.yaml) remains available for advanced agent teams and governance policies. The intended v0.2 simplification is described in [the architecture plan](docs/V0_2_SIMPLIFICATION.md).
+
 ## Install
 
 Install the CLI globally, then start Heddle from any repository:

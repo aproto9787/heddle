@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import type { AgentConfig, FlowDefinition } from "@aproto9787/heddle-core";
-import { createScopedMcpConfig, resolveAgentResources } from "./runner-resource-loader.js";
+import { createScopedMcpConfig, resolveAgentResources } from "@aproto9787/heddle-runtime";
 
 test("resolveAgentResources merges flow and agent resources without duplicates", () => {
   const flow: FlowDefinition = {
