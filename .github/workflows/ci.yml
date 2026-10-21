@@ -45,9 +45,11 @@ jobs:
           npm install -g @openai/codex@0.163.0
           codex --version
           codex exec --help > codex-exec-help.txt
-          for flag in --json --model --skip-git-repo-check --sandbox --ask-for-approval --dangerously-bypass-approvals-and-sandbox; do
+          for flag in --json --model --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox; do
             if ! grep -Fq -- "$flag" codex-exec-help.txt; then
               echo "::error::Codex 0.163.0 no longer exposes $flag"
               exit 1
             fi
           done
+          # Global flags may be accepted by exec without appearing in its help list.
+          codex exec --sandbox workspace-write --ask-for-approval never --help > /dev/null
