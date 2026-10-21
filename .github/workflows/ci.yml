@@ -52,4 +52,4 @@ jobs:
             fi
           done
           # Global flags may be accepted by exec without appearing in its help list.
-          codex exec --sandbox workspace-write --ask-for-approval never --help > /dev/null
+          codex --sandbox workspace-write --ask-for-approval never exec --help > /dev/null
