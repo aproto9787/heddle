@@ -15,6 +15,7 @@ import type { AgentConfig, AgentType, FlowDefinition, TimelineEvent } from "@apr
 import { runHeddleMcpServer } from "@aproto9787/heddle-mcp";
 import { buildConfiguredAgent } from "@aproto9787/heddle-runtime";
 import { createCodexInstructionHome, type CodexInstructionHome } from "./codex-home.js";
+import { codexModelArgs } from "./codex-model-args.js";
 import { buildDelegationPrompt } from "./delegation-prompt.js";
 import { buildHeadlessPrompt } from "./session-prompts.js";
 
@@ -377,9 +378,9 @@ function migrateRuntimeDefaults(agent: Record<string, unknown>, pathLabel: strin
   if (runtime.delegationTransport === undefined) runtime.delegationTransport = "mcp";
   agent.runtime = runtime;
 
-  if (agent.model === undefined || (typeof agent.model === "string" && agent.model.startsWith("claude-"))) {
-    agent.model = "gpt-5.5";
-    notes.push(`${pathLabel}.model -> gpt-5.5`);
+  if (typeof agent.model === "string" && agent.model.startsWith("claude-")) {
+    delete agent.model;
+    notes.push(`${pathLabel}.model -> Codex configured default`);
   }
 }
 
@@ -438,8 +439,7 @@ function logMigrationNotes(scope: string, notes: string[]): void {
 }
 
 function buildSpawnArgs(agent: AgentConfig): { command: string; args: string[] } {
-  const args = ["--dangerously-bypass-approvals-and-sandbox"];
-  args.push("-m", agent.model ?? "gpt-5.5");
+  const args = ["--dangerously-bypass-approvals-and-sandbox", ...codexModelArgs(agent.model)];
   return { command: "codex", args };
 }
 
@@ -661,7 +661,7 @@ function buildHeadlessSpawnArgs(agent: AgentConfig, finalInstructions: string, u
     "--json",
     "--dangerously-bypass-approvals-and-sandbox",
     "--skip-git-repo-check",
-    "--model", agent.model ?? "gpt-5.5",
+    ...codexModelArgs(agent.model),
   ];
   args.push(buildHeadlessPrompt(finalInstructions, userPrompt));
   return { command: "codex", args };
@@ -877,7 +877,6 @@ orchestrator:
     profile: codex-default
     applyResources: prompt-only
     delegationTransport: mcp
-  model: gpt-5.5
   system: |
     You are the orchestrator for ${name}. Delegate work to your team.
   effort: xhigh
