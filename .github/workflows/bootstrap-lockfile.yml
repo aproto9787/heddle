@@ -1,0 +1,36 @@
+name: Bootstrap pnpm lockfile
+
+# One-off branch-scoped workflow. Removed after the generated lockfile is committed.
+on:
+  push:
+    branches: [maintenance/reproducible-deps-20261022]
+
+permissions:
+  contents: write
+
+jobs:
+  generate-lockfile:
+    runs-on: ubuntu-latest
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.7.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Generate lockfile
+        run: pnpm install --lockfile-only --no-frozen-lockfile
+      - name: Commit lockfile to maintenance branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pnpm-lock.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: add pnpm lockfile [lockfile-bootstrap]"
+            git push origin HEAD:refs/heads/maintenance/reproducible-deps-20261022
+          fi
