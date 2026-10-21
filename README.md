@@ -111,6 +111,12 @@ MCP connects them with a traceable delegation boundary.
 - Phase-gated workflow policy: phase work can require `user-advocate` PASS before moving forward.
 - Debate routing policy: casual `debate`, `vs`, comparison, recommendation, or decision prompts can route through debater agents.
 
+## Codex model selection
+
+Heddle inherits the model from your local Codex configuration when a flow or role does not declare a `model`. This allows new Heddle runs to follow Codex model updates without requiring a Heddle release.
+
+To pin a model for a particular agent, add `model: your-model-id` to that agent in the flow YAML. An explicit model always takes precedence. Existing flows with a model pinned (for example, `gpt-5.5`) retain that override until you remove or change it.
+
 ## Install
 
 Install the CLI globally, then start Heddle from any repository:
