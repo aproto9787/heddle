@@ -70,7 +70,9 @@ Do not document these as implemented unless the code changes first:
 - Root leader MCP config injection for Codex host sessions. Host leaders are instructed to use Heddle MCP delegation only; `heddle-subagent` is the internal worker runtime behind the MCP server.
 - `heddle-subagent` as the generalized child-agent launcher.
 - Goal Pursuit Mode in the default `leader-workers` flow for active `$interview-heddle`/`/goal` style work, including mandatory worker use for non-trivial goals, review/fix loops, usable verification, and user-advocate checks when goal shrinking or excessive conservatism is a risk.
-- Codex CLI adapter.
+- Direct Codex CLI launching in the CLI/subagent executables; the unused private adapters package has been removed.
+- Minimal two-worker example in `examples/simple-team.yaml` (the larger leader-workers flow remains an advanced configuration).
+- Canonical Claude-to-Codex migration and note formatting shared through `packages/core`; no independent server/CLI/subagent migration fallbacks.
 - Role/hook/skill YAML CRUD.
 - MCP/resource discovery and selected MCP config generation.
 - SQLite run/event persistence under `.heddle/traces.db`.
@@ -80,18 +82,18 @@ Do not document these as implemented unless the code changes first:
 
 ## Active runtime split
 
-New subagent behavior still belongs in `packages/cli/src/subagent-launcher.ts`.
+The active execution path is CLI-driven. `apps/server/src/local-cli-runner.ts` launches the CLI for server-initiated runs. `packages/cli/src/index.ts` launches the Codex leader, `packages/mcp` handles delegation tools and task status, and `packages/cli/src/subagent-launcher.ts` handles delegated child execution. `packages/runtime` supplies shared loaders, prompts and subprocess helpers. `apps/server/src/trace-store.ts` persists events.
 
-Shared flow/resource/prompt/hook helpers now live in `packages/runtime`. Server/studio run routes now go through the local CLI path. `apps/server/src/local-cli-runner.ts` remains in the tree as a legacy compatibility path, not as the place for new runtime behavior.
+The redundant server-side `runner*.ts` façade modules and the unused private `packages/adapters` workspace package have been removed. No replacement runtime is shipped in this cleanup. A single Codex session engine is a planned **future** change under [V0_2_SIMPLIFICATION.md](V0_2_SIMPLIFICATION.md).
 
 ## Safe wording for docs
 
 Use wording like:
 
-> Heddle currently runs recursive YAML-defined agent trees using Codex CLI processes.
+> Heddle currently runs recursive YAML-defined Codex agent teams using a CLI leader, MCP delegation and child Codex processes.
 
 Avoid wording like:
 
-> Drag and drop typed edges, run graphs, and watch cost/latency meters.
+> Heddle already has one unified execution engine, generic graph orchestration or proven end-to-end sandbox enforcement.
 
-That may still be a product direction, but it is not the current code-backed implementation.
+Those would overstate the current implementation.
