@@ -1,6 +1,6 @@
 {
   "name": "@aproto9787/heddle",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Local agent control plane for Codex, MCP tools, and repository workflows.",
   "license": "GPL-3.0-only",
   "type": "module",
