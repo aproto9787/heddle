@@ -46,3 +46,48 @@ test("recoverReport creates a diagnostic blocked report when stdout has no repor
   assert.match(report, /debater-a did not write a valid REPORT file/);
   assert.match(report, /child stderr: Reading additional input from stdin\.\.\./);
 });
+
+test("isCompleteReport requires a bullet inside summary rather than another section", () => {
+  const cases = [
+    "status: blocked\nsummary:\nblockers:\n  - waiting for input\n",
+    "status: done\nsummary:\nartifacts:\n  - src/file.ts:1\n",
+    "status: done\nsummary:\n  \nblockers:\n  - incorrectly counted as summary\n",
+  ];
+
+  for (const report of cases) {
+    assert.equal(isCompleteReport(report, "reviewer"), false, report);
+  }
+});
+
+test("isCompleteReport accepts summary bullets with CRLF and later sections", () => {
+  const report = [
+    "status: done",
+    "summary:",
+    "  - reviewed source changes",
+    "artifacts:",
+    "  - src/file.ts:1",
+    "",
+  ].join("\r\n");
+  assert.equal(isCompleteReport(report, "reviewer"), true);
+});
+
+test("recoverReport rejects incomplete Codex final message and uses diagnostic fallback", () => {
+  const invalidReport = "status: done\nsummary:\nblockers:\n  - no actual summary\n";
+  const stdout = JSON.stringify({
+    type: "item.completed",
+    item: {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: invalidReport }],
+    },
+  });
+  const report = recoverReport({
+    name: "reviewer",
+    exitCode: 0,
+    stdout,
+    stderr: "",
+  });
+
+  assert.match(report, /^status: blocked\n/);
+  assert.match(report, /reviewer did not write a valid REPORT file/);
+});
