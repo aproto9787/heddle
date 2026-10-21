@@ -37,6 +37,9 @@ Heddle is not a cloud runtime and it is not a blank node-graph builder. The curr
 > [!IMPORTANT]
 > This repository moves quickly. This README describes the current `master` branch and avoids claims that are not represented in the TypeScript schema or runtime. The product direction lives in [`docs/LOCAL_AGENT_CONTROL_PLANE.md`](docs/LOCAL_AGENT_CONTROL_PLANE.md), and the code-backed status checklist lives in [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md).
 
+> [!WARNING]
+> **Current execution security:** Heddle currently launches Codex leaders and workers with `--dangerously-bypass-approvals-and-sandbox`. This disables Codex's built-in approval and sandbox protections. Use only trusted flows and repositories in an externally isolated environment. See [RELEASING.md](RELEASING.md) for the release safety gate.
+
 ## What Heddle Gives You
 
 | Surface | What it does |
