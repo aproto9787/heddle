@@ -12,9 +12,6 @@
       "@aproto9787/heddle-core": [
         "../../packages/core/src/index.ts"
       ],
-      "@aproto9787/heddle-adapters": [
-        "../../packages/adapters/src/index.ts"
-      ],
       "@aproto9787/heddle-mcp": [
         "../../packages/mcp/src/index.ts"
       ],
@@ -29,9 +26,6 @@
   "references": [
     {
       "path": "../../packages/core"
-    },
-    {
-      "path": "../../packages/adapters"
     },
     {
       "path": "../../packages/runtime"
