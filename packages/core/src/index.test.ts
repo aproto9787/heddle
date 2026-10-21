@@ -82,8 +82,8 @@ test("legacy claude-code flow input migrates to codex with explicit notes", () =
     orchestrator: {
       type: string;
       runtime: { profile: string };
-      model: string;
-      agents: Array<{ type: string; model: string }>;
+      model?: string;
+      agents: Array<{ type: string; model?: string }>;
     };
   };
 
@@ -91,17 +91,17 @@ test("legacy claude-code flow input migrates to codex with explicit notes", () =
   assert.equal(parsed.success, true);
   assert.equal(migratedFlow.orchestrator.type, "codex");
   assert.equal(migratedFlow.orchestrator.runtime.profile, "codex-default");
-  assert.equal(migratedFlow.orchestrator.model, "gpt-5.5");
+  assert.equal(migratedFlow.orchestrator.model, undefined);
   assert.equal(migratedFlow.orchestrator.agents[0]?.type, "codex");
-  assert.equal(migratedFlow.orchestrator.agents[0]?.model, "gpt-5.5");
+  assert.equal(migratedFlow.orchestrator.agents[0]?.model, undefined);
   assert.deepEqual(
     migrated.notes.map((note) => [note.path, note.from, note.to]),
     [
       ["orchestrator.type", "claude-code", "codex"],
       ["orchestrator.runtime.profile", "claude-default", "codex-default"],
-      ["orchestrator.model", "claude-opus-4-7", "gpt-5.5"],
+      ["orchestrator.model", "claude-opus-4-7", "Codex configured default"],
       ["orchestrator.agents.0.type", "claude-code", "codex"],
-      ["orchestrator.agents.0.model", "claude-sonnet-4-6", "gpt-5.5"],
+      ["orchestrator.agents.0.model", "claude-sonnet-4-6", "Codex configured default"],
     ],
   );
   assert.match(migrated.notes[0]?.message ?? "", /converted to codex/);
@@ -120,7 +120,7 @@ test("legacy claude-code roles migrate to codex with explicit notes", () => {
     migrated.notes.map((note) => [note.path, note.from, note.to]),
     [
       ["role.type", "claude-code", "codex"],
-      ["role.model", "claude-sonnet-4-6", "gpt-5.5"],
+      ["role.model", "claude-sonnet-4-6", "Codex configured default"],
     ],
   );
 });

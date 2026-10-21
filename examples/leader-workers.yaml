@@ -253,7 +253,6 @@ orchestrator:
   team:
     - id: execution
       role: leader
-  model: gpt-5.5
   system: |
     Root leader. Read the user's request directly. Handle low-complexity
     work yourself; spawn workers only for independent slices, specialist work,
@@ -298,7 +297,6 @@ orchestrator:
       role: user-advocate
       team:
         - id: execution
-      model: gpt-5.5
       system: |
         Validate the provided artifact against the user's original request
         on four axes: intent alignment, over-engineering, goal shrinking,
@@ -318,7 +316,6 @@ orchestrator:
       team:
         - id: execution
           role: implementer
-      model: gpt-5.5
       system: Backend implementer. Stay inside the assigned slice.
       flowMdRef: base-worker-rules
       effort: high
@@ -331,7 +328,6 @@ orchestrator:
       team:
         - id: execution
           role: implementer
-      model: gpt-5.5
       system: Second backend implementer for parallel work.
       flowMdRef: base-worker-rules
       effort: high
@@ -344,7 +340,6 @@ orchestrator:
       team:
         - id: execution
           role: implementer
-      model: gpt-5.5
       system: Third backend implementer for parallel work.
       flowMdRef: base-worker-rules
       effort: high
@@ -357,7 +352,6 @@ orchestrator:
       team:
         - id: frontend
           role: specialist
-      model: gpt-5.5
       system: |
         Frontend specialist. Build/modify UI and validate in browser
         when possible.
@@ -375,7 +369,6 @@ orchestrator:
       team:
         - id: research
           role: analyst
-      model: gpt-5.5
       system: Read-only investigator. Trace, cite, report. No edits.
       flowMdRef: base-worker-rules
       effort: high
@@ -387,7 +380,6 @@ orchestrator:
       team:
         - id: research
           role: analyst
-      model: gpt-5.5
       system: Second analyst for parallel or cross-angle investigation.
       flowMdRef: base-worker-rules
       effort: high
@@ -399,7 +391,6 @@ orchestrator:
       team:
         - id: review
           role: reviewer
-      model: gpt-5.5
       system: |
         Review impl output against BRIEFING acceptance. Return PASS or
         FAIL with concrete file:line findings.
@@ -414,7 +405,6 @@ orchestrator:
       team:
         - id: execution
           role: fixer
-      model: gpt-5.5
       system: |
         Apply surgical fixes only to reviewer-flagged lines. No
         refactoring, no scope creep.
@@ -428,7 +418,6 @@ orchestrator:
       team:
         - id: discussion
           role: debater
-      model: gpt-5.5
       system: First-stance debater. Argue the position with evidence.
       flowMdRef: base-worker-rules
       effort: high
@@ -440,7 +429,6 @@ orchestrator:
       team:
         - id: discussion
           role: debater
-      model: gpt-5.5
       system: Counter-stance debater. Argue the opposing position.
       flowMdRef: base-worker-rules
       effort: high
@@ -452,7 +440,6 @@ orchestrator:
       team:
         - id: discussion
           role: synthesizer
-      model: gpt-5.5
       system: |
         Read both debater outputs, pick a side or escalate. No bland
         compromise nobody argued for.

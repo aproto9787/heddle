@@ -2,7 +2,6 @@ import { z } from "zod";
 
 export const agentTypeSchema = z.enum(["codex"]);
 export type AgentType = z.infer<typeof agentTypeSchema>;
-const CODEX_DEFAULT_MODEL = "gpt-5.5";
 const CODEX_DEFAULT_PROFILE = "codex-default";
 
 export const providerAuthStateSchema = z.enum(["ready", "missing", "unknown"]);
@@ -419,13 +418,13 @@ function migrateLegacyAgentRecord(record: Record<string, unknown>, path: string,
 
   if (typeof record.model === "string" && record.model.startsWith("claude-")) {
     const oldModel = record.model;
-    record.model = CODEX_DEFAULT_MODEL;
+    delete record.model;
     pushLegacyNote(
       notes,
       `${path}.model`,
       oldModel,
-      CODEX_DEFAULT_MODEL,
-      "Legacy Claude model was converted to the Codex default model.",
+      "Codex configured default",
+      "The incompatible Claude model override was removed so Codex can select its configured default.",
     );
   }
 

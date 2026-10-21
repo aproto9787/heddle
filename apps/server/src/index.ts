@@ -113,9 +113,9 @@ function migrateAgentRecord(value: unknown, pathLabel: string, notes: LegacyMigr
     if (runtime.applyResources === undefined) runtime.applyResources = "prompt-only";
     if (runtime.delegationTransport === undefined) runtime.delegationTransport = "mcp";
     agent.runtime = runtime;
-    if (agent.model === undefined || (typeof agent.model === "string" && agent.model.startsWith("claude-"))) {
-      agent.model = "gpt-5.5";
-      notes.push(`${pathLabel}.model -> gpt-5.5`);
+    if (typeof agent.model === "string" && agent.model.startsWith("claude-")) {
+      delete agent.model;
+      notes.push(`${pathLabel}.model -> Codex configured default`);
     }
   }
   if (Array.isArray(agent.agents)) {
@@ -653,7 +653,6 @@ export function buildServer() {
           applyResources: "prompt-only" as const,
           delegationTransport: "mcp" as const,
         },
-        model: "gpt-5.5",
         system: `You are the orchestrator for ${name}. Delegate work to your team.\n`,
         effort: "high" as const,
         delegation: [],

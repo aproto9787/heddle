@@ -759,7 +759,7 @@ heddleTest("POST /flows/new creates a Codex-only skeleton", async (t) => {
   assert.equal(body.flowPath, flowPath);
   assert.equal(body.flow.orchestrator.type, "codex");
   assert.equal(body.flow.orchestrator.runtime.profile, "codex-default");
-  assert.equal(body.flow.orchestrator.model, "gpt-5.5");
+  assert.equal(body.flow.orchestrator.model, undefined);
 });
 
 heddleTest("PUT /flows/save rejects invalid recursive flow bodies and bad paths", async (t) => {
