@@ -602,3 +602,77 @@ test("heddle_cancel aborts a running async task", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("MCP delegation hands its task ID through to the worker result", async () => {
+  const { root, flowPath } = await createTestFlow();
+  try {
+    let runnerTaskId: string | undefined;
+    const server = new HeddleMcpServer({
+      env: {
+        HEDDLE_FLOW_PATH: flowPath,
+        HEDDLE_FLOW_CWD: root,
+        HEDDLE_AGENT: "leader",
+        HEDDLE_SUBAGENT_BIN: "/tmp/heddle-subagent.js",
+      },
+      delegateRunner: async (options) => {
+        runnerTaskId = options.taskId;
+        return { ...fakeResult(options.agent.name), taskId: options.taskId! };
+      },
+    });
+    const started = await server.handleRequest({
+      id: 41,
+      method: "tools/call",
+      params: { name: "heddle_delegate_reviewer", arguments: { briefing: "audit the patch" } },
+    });
+    const task = parseToolText(started);
+    assert.equal(runnerTaskId, task.taskId);
+    await new Promise((resolve) => setImmediate(resolve));
+    const report = await server.handleRequest({
+      id: 42,
+      method: "tools/call",
+      params: { name: "heddle_read_report", arguments: { taskId: task.taskId } },
+    });
+    assert.equal(parseToolText(report).taskId, task.taskId);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cancelled tasks cannot be overwritten by a late worker completion", async () => {
+  const { root, flowPath } = await createTestFlow();
+  try {
+    let finishRunner!: (value: RunSubagentTaskResult) => void;
+    const pending = new Promise<RunSubagentTaskResult>((resolve) => { finishRunner = resolve; });
+    const server = new HeddleMcpServer({
+      env: {
+        HEDDLE_FLOW_PATH: flowPath,
+        HEDDLE_FLOW_CWD: root,
+        HEDDLE_AGENT: "leader",
+        HEDDLE_SUBAGENT_BIN: "/tmp/heddle-subagent.js",
+      },
+      delegateRunner: async () => pending,
+    });
+    const response = await server.handleRequest({
+      id: 43,
+      method: "tools/call",
+      params: { name: "heddle_delegate_reviewer", arguments: { briefing: "work" } },
+    });
+    const { taskId } = parseToolText(response);
+    await server.handleRequest({
+      id: 44,
+      method: "tools/call",
+      params: { name: "heddle_cancel", arguments: { taskId } },
+    });
+    finishRunner(fakeResult("reviewer"));
+    await pending;
+    await new Promise((resolve) => setImmediate(resolve));
+    const status = await server.handleRequest({
+      id: 45,
+      method: "tools/call",
+      params: { name: "heddle_get_status", arguments: { taskId } },
+    });
+    assert.equal(parseToolText(status).status, "cancelled");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
