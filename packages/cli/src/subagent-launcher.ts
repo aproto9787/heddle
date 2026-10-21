@@ -6,7 +6,6 @@
 // server tagged with this subagent's name and parent, and writes a REPORT to
 // stdout / file.
 
-import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -17,9 +16,11 @@ import { migrateLegacyFlowDefinitionInput, type AgentConfig, type FlowDefinition
 import {
   buildConfiguredAgent,
   findAgentByName,
+  codexArgs,
+  parseCodexStreamLine,
+  startCodexSession,
 } from "@aproto9787/heddle-runtime";
 import { buildDelegationPrompt } from "./delegation-prompt.js";
-import { codexModelArgs } from "./codex-model-args.js";
 import { initialReport, isCompleteReport as isValidReport, recoverReport } from "./subagent-report.js";
 
 type Backend = "codex";
@@ -208,44 +209,6 @@ async function postEvent(
   }
 }
 
-interface MappedEvent {
-  type: HeddleEventType;
-  summary: string;
-  toolName?: string;
-}
-
-function mapCodexItem(item: Record<string, unknown>): MappedEvent | null {
-  const itemType = typeof item.type === "string" ? item.type : undefined;
-  if (!itemType) return null;
-  switch (itemType) {
-    case "agent_message": {
-      const text = typeof item.text === "string" ? item.text : "";
-      if (!text.trim()) return null;
-      return { type: "assistant", summary: truncate(text) };
-    }
-    case "reasoning": {
-      const text = typeof item.text === "string" ? item.text : "";
-      if (!text.trim()) return null;
-      return { type: "assistant", summary: truncate(`reasoning: ${text}`), toolName: "reasoning" };
-    }
-    case "command_execution": {
-      const cmd = typeof item.command === "string" ? item.command : "command";
-      return { type: "tool_use", summary: truncate(cmd), toolName: "Bash" };
-    }
-    case "file_change": {
-      const pathStr = typeof item.path === "string" ? item.path : "";
-      const op = typeof item.operation === "string" ? item.operation : "edit";
-      return { type: "tool_result", summary: truncate(`${op} ${pathStr}`), toolName: "Edit" };
-    }
-    default: {
-      const summary = typeof (item as { summary?: unknown }).summary === "string"
-        ? (item as { summary: string }).summary
-        : itemType;
-      return { type: "tool_use", summary: truncate(summary), toolName: itemType };
-    }
-  }
-}
-
 interface FlowContext {
   flow: FlowDefinition;
   selfAgent: AgentConfig;
@@ -426,156 +389,71 @@ async function runBackend(args: CliArgs, reportPath: string): Promise<number> {
     childEnv.CODEX_HOME = path.join(isolatedHome, ".codex");
     childEnv.CODEX_CONFIG_DIR = path.join(isolatedHome, ".codex");
   }
-  const prompt = buildCodexPrompt(args, reportPath, delegation);
-  const command = "codex";
-  const childArgs = [
-    "exec",
-    "--json",
-    ...codexModelArgs(args.model),
-    "--dangerously-bypass-approvals-and-sandbox",
-    "--skip-git-repo-check",
-    "-",
-  ];
-  const parseLine = (line: string): MappedEvent[] => {
+  const session = startCodexSession({
+    args: codexArgs({ mode: "exec", model: args.model, stdinPrompt: true }),
+    env: childEnv,
+    stdio: ["pipe", "pipe", "pipe"],
+    stdinText: buildCodexPrompt(args, reportPath, delegation),
+    timeoutMs: args.maxSeconds * 1000,
+    onStdoutLine: (line) => {
+      const event = parseCodexStreamLine(line);
+      if (event) void postEvent(args, event.type, event.summary, { toolName: event.toolName });
+    },
+  });
+
+  let reportSnapshot = "";
+  let reportSeenAt = 0;
+  let reportDrivenExit = false;
+  let reportShutdownStarted = false;
+  let reportCheckRunning = false;
+  const checkReport = async () => {
+    if (reportShutdownStarted || reportCheckRunning || !session.isRunning()) return;
+    reportCheckRunning = true;
     try {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      if (parsed.type !== "item.completed") return [];
-      const item = parsed.item;
-      if (!item || typeof item !== "object") return [];
-      const mapped = mapCodexItem(item as Record<string, unknown>);
-      return mapped ? [mapped] : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const exitCode = await new Promise<number>((resolve) => {
-    const child = spawn(command, childArgs, {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: childEnv,
-    });
-
-    let buffer = "";
-    let stdout = "";
-    let stderr = "";
-    let reportSnapshot = "";
-    let reportSeenAt = 0;
-    let reportDrivenExit = false;
-    let reportShutdownStarted = false;
-    let childExited = false;
-    let reportShutdownKiller: ReturnType<typeof setTimeout> | undefined;
-
-    const flushLines = (chunk: string) => {
-      buffer += chunk;
-      let newlineIndex = buffer.indexOf("\n");
-      while (newlineIndex !== -1) {
-        const line = buffer.slice(0, newlineIndex).trim();
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line) {
-          for (const mapped of parseLine(line)) {
-            postEvent(args, mapped.type, mapped.summary, { toolName: mapped.toolName }).catch(() => undefined);
-          }
-        }
-        newlineIndex = buffer.indexOf("\n");
-      }
-    };
-
-    const cleanupTimers = () => {
-      clearTimeout(killer);
-      clearInterval(reportWatcher);
-      if (reportShutdownKiller) clearTimeout(reportShutdownKiller);
-    };
-
-    const checkReport = async () => {
-      if (reportShutdownStarted) return;
-      let report: string;
-      try {
-        report = await readFile(reportPath, "utf8");
-      } catch {
-        return;
-      }
+      const report = await readFile(reportPath, "utf8").catch(() => "");
       if (!isCompleteReport(report, args)) {
         reportSnapshot = "";
         reportSeenAt = 0;
         return;
       }
-
       if (report !== reportSnapshot) {
         reportSnapshot = report;
         reportSeenAt = Date.now();
         return;
       }
-
       if (Date.now() - reportSeenAt < REPORT_STABLE_MS) return;
       reportDrivenExit = true;
       reportShutdownStarted = true;
-      child.kill("SIGTERM");
-      reportShutdownKiller = setTimeout(() => {
-        if (!childExited) child.kill("SIGKILL");
-      }, REPORT_SHUTDOWN_GRACE_MS);
-    };
+      session.stop(REPORT_SHUTDOWN_GRACE_MS);
+    } finally {
+      reportCheckRunning = false;
+    }
+  };
+  const reportWatcher = setInterval(() => { void checkReport(); }, REPORT_POLL_MS);
+  void checkReport();
 
-    child.stdin?.on("error", () => undefined);
-    child.stdin?.end(prompt);
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      stdout += chunk;
-      flushLines(chunk);
-    });
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-
-    const killer = setTimeout(() => {
-      child.kill("SIGTERM");
-    }, args.maxSeconds * 1000);
-    const reportWatcher = setInterval(() => {
-      void checkReport();
-    }, REPORT_POLL_MS);
-    void checkReport();
-
-    child.once("exit", (code) => {
-      void (async () => {
-        childExited = true;
-        cleanupTimers();
-        if (buffer.trim()) {
-          for (const mapped of parseLine(buffer.trim())) {
-            postEvent(args, mapped.type, mapped.summary, { toolName: mapped.toolName }).catch(() => undefined);
-          }
-          buffer = "";
-        }
-
-        let finalReport = reportSnapshot;
-        try {
-          finalReport = await readFile(reportPath, "utf8");
-        } catch {
-          finalReport = "";
-        }
-        if (!isCompleteReport(finalReport, args)) {
-          finalReport = recoverReport({
-            name: args.name,
-            exitCode: code ?? 1,
-            stdout,
-            stderr,
-          });
-          await writeFile(reportPath, finalReport, "utf8");
-        }
-        resolve(isCompleteReport(finalReport, args) ? 0 : (code ?? 1));
-      })().catch(() => {
-        resolve(reportDrivenExit || isCompleteReport(reportSnapshot, args) ? 0 : (code ?? 1));
+  let exitCode = 1;
+  try {
+    const result = await session.finished;
+    let finalReport = await readFile(reportPath, "utf8").catch(() => "");
+    if (!isCompleteReport(finalReport, args)) {
+      finalReport = recoverReport({
+        name: args.name,
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.error ? result.stderr + "\\n" + result.error.message : result.stderr,
       });
-    });
-    child.once("error", () => {
-      cleanupTimers();
-      resolve(reportDrivenExit ? 0 : 1);
-    });
-  });
-
-  for (const fn of cleanup) {
-    await fn();
+      await writeFile(reportPath, finalReport, "utf8");
+    }
+    exitCode = result.error || result.timedOut || result.cancelled ? 1
+      : isCompleteReport(finalReport, args) || (reportDrivenExit && isCompleteReport(reportSnapshot, args))
+        ? 0 : result.exitCode;
+  } finally {
+    clearInterval(reportWatcher);
+    for (const fn of cleanup) await fn();
   }
   return exitCode;
+
 }
 
 async function main(): Promise<void> {
