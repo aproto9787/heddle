@@ -11,7 +11,7 @@ import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 import * as HeddleCore from "@aproto9787/heddle-core";
-import type { AgentConfig, AgentType, FlowDefinition, TimelineEvent } from "@aproto9787/heddle-core";
+import { formatLegacyMigrationNotes, type AgentConfig, type AgentType, type FlowDefinition, type TimelineEvent } from "@aproto9787/heddle-core";
 import { runHeddleMcpServer } from "@aproto9787/heddle-mcp";
 import { buildConfiguredAgent } from "@aproto9787/heddle-runtime";
 import { createCodexInstructionHome, type CodexInstructionHome } from "./codex-home.js";
@@ -297,139 +297,21 @@ interface MigrationResult<T> {
   notes: string[];
 }
 
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function hasLegacyAgentType(value: unknown): boolean {
-  if (!value || typeof value !== "object") return false;
-  if ((value as { type?: unknown }).type === "claude-code") return true;
-  if ((value as { agentType?: unknown }).agentType === "claude-code") return true;
-  if (Array.isArray(value)) return value.some((entry) => hasLegacyAgentType(entry));
-  return Object.values(value as Record<string, unknown>).some((entry) => hasLegacyAgentType(entry));
-}
-
-function migrationNotesFrom(value: unknown): string[] {
-  if (!value || typeof value !== "object") return [];
-  const record = value as Record<string, unknown>;
-  const notes = record.notes ?? record.migrationNotes ?? record.warnings;
-  if (Array.isArray(notes)) {
-    return notes
-      .map((entry) => {
-        if (typeof entry === "string") return entry;
-        if (!entry || typeof entry !== "object") return "";
-        const note = entry as { path?: unknown; from?: unknown; to?: unknown; message?: unknown };
-        const pathLabel = typeof note.path === "string" ? note.path : "legacy";
-        const from = typeof note.from === "string" ? note.from : undefined;
-        const to = typeof note.to === "string" ? note.to : undefined;
-        const message = typeof note.message === "string" ? note.message : undefined;
-        return [pathLabel, from && to ? `${from} -> ${to}` : undefined, message].filter(Boolean).join(": ");
-      })
-      .filter((entry) => entry.trim().length > 0);
-  }
-  return [];
-}
-
-function migrationValueFrom<T>(value: unknown): T | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const record = value as Record<string, unknown>;
-  return (record.flow ?? record.value ?? record.migrated ?? record.result ?? value) as T;
-}
-
-function runCoreLegacyMigration<T>(value: T): MigrationResult<T> | undefined {
-  const helpers = [
-    "migrateLegacyFlowDefinitionInput",
-    "migrateLegacyFlowToCodex",
-    "migrateLegacyAgentTypesToCodex",
-    "migrateLegacyClaudeCodeToCodex",
-    "normalizeLegacyAgentTypes",
-  ];
-  const coreExports = HeddleCore as Record<string, unknown>;
-
-  for (const helperName of helpers) {
-    const helper = coreExports[helperName];
-    if (typeof helper !== "function") continue;
-    try {
-      const migrated = helper(cloneJson(value)) as unknown;
-      const migrationValue = migrationValueFrom<T>(migrated);
-      if (!migrationValue) continue;
-      const notes = migrationNotesFrom(migrated);
-      return {
-        value: migrationValue,
-        notes: notes.length > 0 ? notes : [`core legacy migration helper ${helperName} applied`],
-      };
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
-}
-
-function migrateRuntimeDefaults(agent: Record<string, unknown>, pathLabel: string, notes: string[]): void {
-  const runtime = agent.runtime && typeof agent.runtime === "object"
-    ? { ...(agent.runtime as Record<string, unknown>) }
-    : {};
-  if (runtime.profile === undefined || runtime.profile === "claude-default") {
-    runtime.profile = "codex-default";
-    notes.push(`${pathLabel}.runtime.profile -> codex-default`);
-  }
-  if (runtime.mode === undefined) runtime.mode = "host";
-  if (runtime.applyResources === undefined) runtime.applyResources = "prompt-only";
-  if (runtime.delegationTransport === undefined) runtime.delegationTransport = "mcp";
-  agent.runtime = runtime;
-
-  if (typeof agent.model === "string" && agent.model.startsWith("claude-")) {
-    delete agent.model;
-    notes.push(`${pathLabel}.model -> Codex configured default`);
-  }
-}
-
-function migrateAgentRecord(value: unknown, pathLabel: string, notes: string[]): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const agent = { ...(value as Record<string, unknown>) };
-  if (agent.type === "claude-code") {
-    agent.type = "codex";
-    notes.push(`${pathLabel}.type claude-code -> codex`);
-  }
-  if (agent.type === "codex") {
-    migrateRuntimeDefaults(agent, pathLabel, notes);
-  }
-  if (Array.isArray(agent.agents)) {
-    agent.agents = agent.agents.map((child, index) => migrateAgentRecord(child, `${pathLabel}.agents.${index}`, notes));
-  }
-  return agent;
-}
-
-function applyBuiltInFlowMigration<T>(value: T): MigrationResult<T> {
-  const notes: string[] = [];
-  if (!value || typeof value !== "object") return { value, notes };
-  const flow = { ...(value as Record<string, unknown>) };
-  if (flow.orchestrator) {
-    flow.orchestrator = migrateAgentRecord(flow.orchestrator, "orchestrator", notes);
-  }
-  return { value: flow as T, notes };
-}
-
+/** Core is the single migration contract for CLI, server and workers. */
 function migrateLegacyFlowToCodex<T>(value: T): MigrationResult<T> {
-  if (!hasLegacyAgentType(value)) {
-    return { value, notes: [] };
-  }
-
-  const coreMigration = runCoreLegacyMigration(value);
-  const builtInMigration = applyBuiltInFlowMigration(coreMigration?.value ?? value);
+  const migrated = HeddleCore.migrateLegacyFlowDefinitionInput(value);
   return {
-    value: builtInMigration.value,
-    notes: [
-      ...(coreMigration?.notes ?? ["core legacy migration helper unavailable; applied built-in Codex migration"]),
-      ...builtInMigration.notes,
-    ],
+    value: migrated.value as T,
+    notes: formatLegacyMigrationNotes(migrated.notes),
   };
 }
 
 function migrateLegacyAgentToCodex(agent: AgentConfig, pathLabel: string): MigrationResult<AgentConfig> {
-  const flowMigration = migrateLegacyFlowToCodex({ orchestrator: agent });
-  const migrated = flowMigration.value as { orchestrator: AgentConfig };
-  return { value: migrated.orchestrator, notes: flowMigration.notes.map((note) => note.replace(/^orchestrator/, pathLabel)) };
+  const migrated = migrateLegacyFlowToCodex({ orchestrator: agent });
+  return {
+    value: migrated.value.orchestrator,
+    notes: migrated.notes.map((note) => note.replace(/^orchestrator/, pathLabel)),
+  };
 }
 
 function logMigrationNotes(scope: string, notes: string[]): void {
