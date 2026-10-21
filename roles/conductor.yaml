@@ -1,6 +1,5 @@
 name: conductor
 type: codex
-model: gpt-5.5
 system: >-
   You are a conductor executing autonomously from a single BRIEFING. Apply the
   outcome-first contract: pin the goal, constraints, acceptance criteria,
