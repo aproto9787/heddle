@@ -4,6 +4,7 @@ import {
   flowDefinitionSchema,
   gateRecordSchema,
   governanceConfigSchema,
+  formatLegacyMigrationNotes,
   migrateLegacyFlowDefinitionInput,
   migrateLegacyRoleDefinitionInput,
   runManifestSchema,
@@ -174,4 +175,13 @@ test("run manifests connect tiers, gates, approvals, and rollback records", () =
   });
 
   assert.equal(parsed.success, true);
+});
+
+test("legacy migration notes are formatted once for every caller", () => {
+  assert.deepEqual(formatLegacyMigrationNotes([{
+    path: "orchestrator.type",
+    from: "claude-code",
+    to: "codex",
+    message: "Converted legacy agent.",
+  }]), ["orchestrator.type: claude-code -> codex: Converted legacy agent."]);
 });
