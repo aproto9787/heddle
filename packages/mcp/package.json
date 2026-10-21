@@ -1,6 +1,6 @@
 {
   "name": "@aproto9787/heddle-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP delegation bridge for Heddle local coding-agent workers.",
   "license": "GPL-3.0-only",
   "type": "module",
