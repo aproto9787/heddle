@@ -157,6 +157,10 @@ export class HeddleMcpServer {
     if (name === "heddle_read_report") {
       const { taskId } = parseReadReportArguments(args);
       const task = this.getTask(taskId);
+      // Never report a cancelled task as 'done' because its worker returned late.
+      if (task.status === "cancelled") {
+        return textResult({ taskId, agent: task.agent, status: "cancelled", result: task.result });
+      }
       return textResult(task.result ?? {
         taskId,
         agent: task.agent,
