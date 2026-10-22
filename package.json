@@ -13,7 +13,8 @@
     "publish:npm:mcp": "pnpm --filter @aproto9787/heddle-mcp publish --access public",
     "publish:npm:cli": "pnpm --filter @aproto9787/heddle publish --access public",
     "publish:npm": "pnpm publish:npm:core && pnpm publish:npm:runtime && pnpm publish:npm:mcp && pnpm publish:npm:cli",
-    "test:golden": "node --test tests/golden-path.test.mjs"
+    "test:golden": "node --test tests/golden-path.test.mjs",
+    "test:codex-flags": "node --test tests/codex-cli-flags.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
