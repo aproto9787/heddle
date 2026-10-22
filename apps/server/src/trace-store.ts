@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { AgentType, RunRecord, RunSource, RunStatus, RunSummary, TimelineEvent, TimelineEventType } from "@aproto9787/heddle-core";
+import { transitionRunStatus, type AgentType, type RunRecord, type RunSource, type RunStatus, type RunSummary, type TimelineEvent, type TimelineEventType } from "@aproto9787/heddle-core";
 
 export type PersistedRunEventType = TimelineEventType;
 export type PersistedRunEvent = TimelineEvent;
@@ -207,8 +207,15 @@ export function updateRunRecord(
     return false;
   }
 
+  const currentStatus = String(current.status) as RunStatus;
+  const nextStatus = updates.status
+    ? transitionRunStatus(currentStatus, updates.status)
+    : currentStatus;
+  // CLI callbacks, abort requests and stale detection may race. Persist the
+  // first terminal result; do not rewrite its status/exit code after the fact.
+  if (updates.status && currentStatus !== "running") return true;
+
   const nextOutput = updates.output ?? JSON.parse(String(current.outputs)) as string;
-  const nextStatus = updates.status ?? String(current.status) as RunStatus;
   const nextExitCode = updates.exitCode ?? (current.exit_code == null ? null : Number(current.exit_code));
   const nextEndedAt = updates.endedAt ?? (current.ended_at == null ? null : String(current.ended_at));
   const nextCwd = updates.cwd ?? (current.cwd == null ? null : String(current.cwd));
@@ -216,8 +223,8 @@ export function updateRunRecord(
   database.prepare(`
     UPDATE runs
     SET outputs = ?, status = ?, exit_code = ?, ended_at = ?, cwd = ?
-    WHERE run_id = ?
-  `).run(JSON.stringify(nextOutput), nextStatus, nextExitCode, nextEndedAt, nextCwd, runId);
+    WHERE run_id = ? AND status = ?
+  `).run(JSON.stringify(nextOutput), nextStatus, nextExitCode, nextEndedAt, nextCwd, runId, currentStatus);
 
   return true;
 }
