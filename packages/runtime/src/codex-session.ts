@@ -1,4 +1,6 @@
 import { spawn, type StdioOptions } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 /** Shared lifecycle for interactive leaders, headless leaders and Codex workers. */
 export interface CodexSessionOptions {
@@ -147,6 +149,41 @@ export function parseCodexStreamLine(line: string, maxSummaryLength = 160): Code
   return event("tool_use", typeof item.summary === "string" ? item.summary : kind, kind);
 }
 
+/** Resolve the native Codex executable or the official npm Windows shim.
+ * Windows .cmd/.ps1 launchers cannot be safely spawned using shell:false.
+ * Never use shell:true: the Codex prompt is untrusted shell input.
+ */
+export function resolveCodexCommand(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  if (platform !== "win32" || (command !== "codex" && command !== "codex.cmd")) {
+    return { command, args };
+  }
+
+  const directories = (env.PATH ?? env.Path ?? "").split(";").filter(Boolean);
+  // Prefer an actual executable to any script/shim if present on PATH.
+  for (const dir of directories) {
+    const native = path.join(dir, "codex.exe");
+    if (existsSync(native)) return { command: native, args };
+  }
+  for (const dir of directories) {
+    if (!existsSync(path.join(dir, "codex.cmd"))) continue;
+    const launcherCandidates = [
+      path.join(dir, "node_modules", "@openai", "codex", "bin", "codex.js"),
+      path.resolve(dir, "..", "@openai", "codex", "bin", "codex.js"),
+    ];
+    for (const launcher of launcherCandidates) {
+      if (existsSync(launcher)) {
+        return { command: process.execPath, args: [launcher, ...args] };
+      }
+    }
+  }
+  return { command, args };
+}
+
 export function startCodexSession(options: CodexSessionOptions): CodexSession {
   let running = false;
   let stopped = false;
@@ -167,9 +204,11 @@ export function startCodexSession(options: CodexSessionOptions): CodexSession {
     return { finished, stop: () => undefined, cancel: () => undefined, isRunning: () => false };
   }
 
-  const child = spawn(options.command ?? "codex", options.args, {
+  const sessionEnv = options.env ?? process.env;
+  const executable = resolveCodexCommand(options.command ?? "codex", options.args, sessionEnv);
+  const child = spawn(executable.command, executable.args, {
     cwd: options.cwd,
-    env: options.env ?? process.env,
+    env: sessionEnv,
     stdio: options.stdio ?? ["ignore", "pipe", "pipe"],
   });
   running = true;
