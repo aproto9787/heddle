@@ -920,3 +920,65 @@ heddleTest("persisted MCP task events project terminal worker states and stream 
   const notFound = await app.inject({ method: "GET", url: "/runs/missing-run/tasks" });
   assert.equal(notFound.statusCode, 404);
 });
+
+heddleTest("server restart projects orphaned workers as unknown without losing later results", async (t) => {
+  const app = createTestApp(t);
+  const runId = "restarted-worker-status";
+  const registered = await app.inject({
+    method: "POST",
+    url: "/runs/register",
+    payload: {
+      runId,
+      flowPath: "examples/simple-team.yaml",
+      flowName: "Simple Team",
+      agentType: "codex",
+      startTime: new Date().toISOString(),
+      source: "cli",
+    },
+  });
+  assert.equal(registered.statusCode, 201);
+  const running = taskStatusEvent(runId, {
+    taskId: "unresolved-worker", agent: "reviewer", parentAgent: "leader", status: "running",
+  }, Date.now());
+  const accepted = await app.inject({
+    method: "POST",
+    url: `/runs/${runId}/events`,
+    payload: { events: [running] },
+  });
+  assert.equal(accepted.statusCode, 201);
+  const active = await app.inject({ method: "GET", url: `/runs/${runId}/tasks` });
+  assert.equal(active.json().tasks[0].status, "running");
+
+  const finished = await app.inject({
+    method: "PATCH",
+    url: `/runs/${runId}/status`,
+    payload: { endTime: new Date().toISOString(), exitCode: 1, status: "error" },
+  });
+  assert.equal(finished.statusCode, 200);
+
+  // A new HTTP server instance must reconstruct from persisted SQLite records,
+  // not claim to own the disappeared MCP child process.
+  const restartedServer = buildServer();
+  t.after(async () => restartedServer.close());
+  const unresolved = await restartedServer.inject({ method: "GET", url: `/runs/${runId}/tasks` });
+  assert.equal(unresolved.statusCode, 200);
+  assert.deepEqual(unresolved.json().tasks, [{
+    taskId: "unresolved-worker", agent: "reviewer",
+    parentAgent: "leader", status: "unknown", reason: "parent_run_terminal",
+  }]);
+
+  const done = taskStatusEvent(runId, {
+    taskId: "unresolved-worker", agent: "reviewer", status: "done",
+  }, Date.now() + 1);
+  const late = await restartedServer.inject({
+    method: "POST",
+    url: `/runs/${runId}/events`,
+    payload: { events: [done] },
+  });
+  assert.equal(late.statusCode, 201);
+  const recovered = await restartedServer.inject({ method: "GET", url: `/runs/${runId}/tasks` });
+  assert.deepEqual(recovered.json().tasks, [{
+    taskId: "unresolved-worker", agent: "reviewer",
+    parentAgent: "leader", status: "done",
+  }]);
+});
