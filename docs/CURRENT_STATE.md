@@ -79,7 +79,10 @@ Do not document these as implemented unless the code changes first:
 - Shared Codex subprocess/event lifecycle in `packages/runtime/src/codex-session.ts` for interactive leaders, headless leaders and workers.
 - Monotonic run and task terminal statuses from `packages/core/src/lifecycle.ts`, so late completion cannot overwrite cancellation.
 - MCP-authored task state events and a read-only `GET /runs/:id/tasks` projection of SQLite timeline events; Studio integration is still pending.
+- Unresolved worker tasks are projected as `unknown` with `reason: parent_run_terminal` only after a parent run is no longer running; this does not restart or terminate processes.
 - Simulated leader/MCP/fake-worker/SQLite/SSE golden-path test on Linux and Windows.
+- Shared Codex launcher now defaults to a workspace-write sandbox (interactive approvals on-request, headless approvals never); an explicit unsafe opt-in is available for externally isolated environments. Windows npm Codex shim resolution avoids shell interpolation of prompts (in Draft #26, not published).
+- Actual Codex-authenticated and OS sandbox enforcement tests remain unverified.
 - Risk-tier governance schemas, governance event persistence, reconstructed run manifests, and Studio run-detail governance panels.
 - MCP governance tools for gate records, manifest updates, approvals, and rollback records.
 - Tier C+ side-effect gate enforcement that blocks pass records until approval and rollback evidence exist.
