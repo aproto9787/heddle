@@ -34,25 +34,48 @@ export interface CodexSession {
 }
 
 /**
- * Build the same Codex CLI argument contract for all agent entrypoints.
- * The existing execution permissions are intentionally unchanged in this
- * refactor; the security-default change is tracked separately in PR #20.
+ * Heddle launches Codex with a workspace sandbox by default.
+ * These are Codex global flags: they must come before the 'exec' subcommand.
+ *
+ * HEDDLE_CODEX_UNSAFE=1 is a deliberate compatibility escape hatch only for
+ * separately isolated environments. Normal local sessions must not bypass
+ * approvals or the OS sandbox.
  */
+export interface CodexSecurityEnv {
+  HEDDLE_CODEX_UNSAFE?: string;
+}
+
+export function codexSecurityArgs(
+  interactive: boolean,
+  env: CodexSecurityEnv = process.env,
+): string[] {
+  if (env.HEDDLE_CODEX_UNSAFE === "1") {
+    return ["--dangerously-bypass-approvals-and-sandbox"];
+  }
+  return [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", interactive ? "on-request" : "never",
+  ];
+}
+
+/** One Codex invocation contract for leaders and delegated workers. */
 export function codexArgs(input: {
   mode: "interactive" | "exec";
   model?: string;
   prompt?: string;
   stdinPrompt?: boolean;
+  env?: CodexSecurityEnv;
 }): string[] {
   const model = input.model?.trim();
   const modelArgs = model ? ["--model", model] : [];
+  const security = codexSecurityArgs(input.mode === "interactive", input.env);
   if (input.mode === "interactive") {
-    return ["--dangerously-bypass-approvals-and-sandbox", ...modelArgs];
+    return [...security, ...modelArgs];
   }
   return [
+    ...security,
     "exec",
     "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
     "--skip-git-repo-check",
     ...modelArgs,
     input.stdinPrompt ? "-" : (input.prompt ?? ""),
