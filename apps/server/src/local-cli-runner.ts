@@ -76,10 +76,13 @@ export function startLocalCliRun(input: LocalCliRunInput): { runId: string; chil
   return { runId: input.runId, child };
 }
 
-export function abortLocalCliRun(runId: string): boolean {
+export function abortLocalCliRun(runId: string, onAbort?: () => void): boolean {
   const child = activeLocalCliRuns.get(runId);
   if (!child) return false;
-  child.kill("SIGTERM");
+  // The mock path can run its exit callback synchronously during kill().
+  // Persist 'aborted' before asking the child to terminate.
   activeLocalCliRuns.delete(runId);
+  onAbort?.();
+  child.kill("SIGTERM");
   return true;
 }
