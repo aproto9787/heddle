@@ -818,12 +818,13 @@ export function buildServer() {
     if (!params.success) {
       return reply.code(400).send({ error: flattenValidationError(params.error) });
     }
-    if (!getRun(params.data.id)) {
+    const run = getRun(params.data.id);
+    if (!run) {
       return reply.code(404).send({ error: { message: "run not found" } });
     }
     return reply.code(200).send({
       runId: params.data.id,
-      tasks: projectTaskStatuses(listRunEvents(params.data.id)),
+      tasks: projectTaskStatuses(listRunEvents(params.data.id), run.status),
     });
   });
 

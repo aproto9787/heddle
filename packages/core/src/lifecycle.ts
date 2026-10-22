@@ -24,6 +24,8 @@ export interface AgentTaskSnapshot {
   agent: string;
   status: AgentTaskStatus;
   parentAgent?: string;
+  /** Derived-only: the parent run ended without a terminal worker event. */
+  reason?: "parent_run_terminal";
 }
 
 export const TASK_STATUS_TOOL = "heddle-task";
@@ -51,8 +53,15 @@ export function taskStatusEvent(
   };
 }
 
-/** Reconstruct a read-only task projection from persisted run timeline events. */
-export function projectTaskStatuses(events: readonly TimelineEvent[]): AgentTaskSnapshot[] {
+/**
+ * Reconstruct a read-only task projection from persisted run events.
+ * Missing worker completion is reported as unknown only when the parent run
+ * is already terminal. This does NOT restart or kill any external processes.
+ */
+export function projectTaskStatuses(
+  events: readonly TimelineEvent[],
+  runStatus: RunStatus = "running",
+): AgentTaskSnapshot[] {
   const tasks = new Map<string, AgentTaskSnapshot>();
   for (const event of events) {
     if (event.toolName !== TASK_STATUS_TOOL || !event.raw ||
@@ -76,5 +85,10 @@ export function projectTaskStatuses(events: readonly TimelineEvent[]): AgentTask
       parentAgent: typeof raw.parentAgent === "string" ? raw.parentAgent : previous?.parentAgent,
     });
   }
-  return [...tasks.values()];
+  if (runStatus === "running") return [...tasks.values()];
+  // Do not persist inferred terminal worker statuses: a delayed genuine
+  // worker report may still arrive and should replace this read-only guess.
+  return [...tasks.values()].map((task) => task.status === "running"
+    ? { ...task, status: "unknown" as const, reason: "parent_run_terminal" as const }
+    : task);
 }
