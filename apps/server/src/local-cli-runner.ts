@@ -23,7 +23,7 @@ export function startLocalCliRun(input: LocalCliRunInput): { runId: string; chil
       activeLocalCliRuns.delete(input.runId);
       input.onExit?.(exitCode);
     };
-    const timer = setTimeout(() => complete(0), 10);
+    const timer = setTimeout(() => complete(0), Number(process.env.HEDDLE_MOCK_DELAY_MS ?? 10));
     const child = {
       kill: () => {
         clearTimeout(timer);
