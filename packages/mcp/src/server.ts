@@ -4,6 +4,8 @@ import {
   approvalRecordSchema,
   gateRecordSchema,
   rollbackRecordSchema,
+  taskStatusEvent,
+  transitionTaskStatus,
   type AgentConfig,
   type ApprovalRecord,
   type GateRecord,
@@ -129,6 +131,32 @@ export class HeddleMcpServer {
     return task;
   }
 
+  /** MCP is the live task owner; the server stores a read-only event projection. */
+  private async publishTaskStatus(task: TaskState): Promise<void> {
+    if (!task.runId || !task.serverOrigin) return;
+    try {
+      const event = taskStatusEvent(task.runId, {
+        taskId: task.taskId,
+        agent: task.agent,
+        status: task.status,
+        parentAgent: task.parentAgent,
+      });
+      const response = await fetch(
+        `${task.serverOrigin.replace(/[/]+$/, "")}/runs/${encodeURIComponent(task.runId)}/events`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ events: [event] }),
+        },
+      );
+      if (!response.ok) {
+        // Status events remain best-effort: local delegation also works offline.
+      }
+    } catch {
+      // An optional run-history server must never block a delegated task.
+    }
+  }
+
   private async callTool(name: string | undefined, args: unknown): Promise<Record<string, unknown>> {
     if (name === "heddle_delegate") {
       return textResult(await this.delegate(args));
@@ -172,8 +200,9 @@ export class HeddleMcpServer {
       const { taskId } = parseReadReportArguments(args);
       const task = this.getTask(taskId);
       if (task.status === "running") {
+        task.status = transitionTaskStatus(task.status, "cancelled");
         task.controller.abort();
-        task.status = "cancelled";
+        void this.publishTaskStatus(task);
       }
       return textResult({
         taskId,
@@ -412,15 +441,25 @@ export class HeddleMcpServer {
       status: "running",
       promise,
       controller,
+      runId: context.runId,
+      serverOrigin: context.serverOrigin,
+      parentAgent: context.currentAgentName,
     };
     this.tasks.set(taskId, task);
+    void this.publishTaskStatus(task);
     promise.then((result) => {
       task.result = result;
-      if (task.status !== "cancelled") task.status = result.status;
+      const next = transitionTaskStatus(task.status, result.status);
+      if (next !== task.status) {
+        task.status = next;
+        void this.publishTaskStatus(task);
+      }
     }).catch((error: unknown) => {
-      if (task.status !== "cancelled") {
-        task.status = "error";
+      const next = transitionTaskStatus(task.status, "error");
+      if (next !== task.status) {
+        task.status = next;
         task.error = error instanceof Error ? error.message : String(error);
+        void this.publishTaskStatus(task);
       }
     });
 
@@ -437,8 +476,14 @@ export class HeddleMcpServer {
       };
     }
     task.result = result;
-    if (task.status !== "cancelled") task.status = result.status;
-    return result;
+    const next = transitionTaskStatus(task.status, result.status);
+    if (next !== task.status) {
+      task.status = next;
+      void this.publishTaskStatus(task);
+    }
+    return task.status === "cancelled"
+      ? { taskId, agent: target.name, status: "cancelled" }
+      : result;
   }
 
   private async waitForTaskResult(task: TaskState): Promise<RunSubagentTaskResult | undefined> {

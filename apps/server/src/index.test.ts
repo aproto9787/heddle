@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import type { FlowDefinition } from "@aproto9787/heddle-core";
+import { taskStatusEvent, type FlowDefinition } from "@aproto9787/heddle-core";
 import { buildServer } from "./index.js";
 import { markStaleRuns, resetTraceStore } from "./trace-store.js";
 
@@ -836,4 +836,87 @@ heddleTest("GET /flows/get validates the minimal two-worker example", async (t) 
     "reviewer",
   ]);
   assert.equal(body.flow.orchestrator.model, undefined);
+});
+
+heddleTest("aborting a server-run CLI preserves aborted after late completion", async (t) => {
+  const app = createTestApp(t);
+  process.env.HEDDLE_MOCK_DELAY_MS = "400";
+  t.after(() => { delete process.env.HEDDLE_MOCK_DELAY_MS; });
+
+  const start = await app.inject({
+    method: "POST",
+    url: "/runs",
+    payload: { flowPath: "examples/simple-team.yaml", userPrompt: "Check abort safety" },
+  });
+  assert.equal(start.statusCode, 202);
+  const runId = start.json().runId as string;
+
+  const abort = await app.inject({ method: "POST", url: `/runs/${runId}/abort` });
+  assert.equal(abort.statusCode, 202);
+  assert.equal(abort.json().aborted, true);
+
+  const afterAbort = await app.inject({ method: "GET", url: `/runs/${runId}` });
+  assert.equal(afterAbort.json().status, "aborted");
+  assert.equal(afterAbort.json().exitCode, 1);
+
+  const lateCli = await app.inject({
+    method: "PATCH",
+    url: `/runs/${runId}/status`,
+    payload: { endTime: new Date().toISOString(), exitCode: 0, status: "done" },
+  });
+  assert.equal(lateCli.statusCode, 200);
+  await sleep(25);
+
+  const detail = await app.inject({ method: "GET", url: `/runs/${runId}` });
+  assert.equal(detail.json().status, "aborted");
+  assert.equal(detail.json().exitCode, 1);
+});
+
+heddleTest("persisted MCP task events project terminal worker states and stream over SSE", async (t) => {
+  const app = createTestApp(t);
+  const runId = "task-projection-golden";
+  const origin = await app.listen({ port: 0, host: "127.0.0.1" });
+  const registered = await app.inject({
+    method: "POST",
+    url: "/runs/register",
+    payload: {
+      runId,
+      flowPath: "examples/simple-team.yaml",
+      flowName: "Simple Team",
+      agentType: "codex",
+      startTime: new Date().toISOString(),
+      source: "cli",
+    },
+  });
+  assert.equal(registered.statusCode, 201);
+
+  const stream = readRunStreamEvents(origin, runId, 3);
+  await sleep(40);
+  const events = [
+    taskStatusEvent(runId, { taskId: "worker-1", agent: "reviewer", parentAgent: "leader", status: "running" }, Date.now()),
+    taskStatusEvent(runId, { taskId: "worker-1", agent: "reviewer", parentAgent: "leader", status: "cancelled" }, Date.now() + 1),
+    taskStatusEvent(runId, { taskId: "worker-1", agent: "reviewer", status: "done" }, Date.now() + 2),
+  ];
+  const posted = await app.inject({
+    method: "POST",
+    url: `/runs/${runId}/events`,
+    payload: { events },
+  });
+  assert.equal(posted.statusCode, 201);
+  const tasks = await app.inject({ method: "GET", url: `/runs/${runId}/tasks` });
+  assert.equal(tasks.statusCode, 200);
+  assert.deepEqual(tasks.json().tasks, [{
+    taskId: "worker-1",
+    agent: "reviewer",
+    parentAgent: "leader",
+    status: "cancelled",
+  }]);
+  const observed = await stream;
+  assert.equal(observed.events.length, 3);
+  assert.deepEqual(observed.events.map((event) =>
+    (event.data as { raw?: { status: string } }).raw?.status
+  ), ["running", "cancelled", "done"]);
+
+  const notFound = await app.inject({ method: "GET", url: "/runs/missing-run/tasks" });
+  assert.equal(notFound.statusCode, 404);
 });

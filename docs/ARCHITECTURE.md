@@ -1,6 +1,6 @@
 # Heddle architecture — current v0.1.x implementation
 
-This is the **as-built** architecture after the first simplification pass. For the planned v0.2 target, read [V0_2_SIMPLIFICATION.md](V0_2_SIMPLIFICATION.md). Do not confuse that target with shipped behavior.
+This describes the source on the stacked v0.2 refactor branches (#24 and #25), not the current published npm CLI. For the planned v0.2 target, read [V0_2_SIMPLIFICATION.md](V0_2_SIMPLIFICATION.md). Do not confuse that target with shipped behavior.
 
 ## What it does
 
@@ -34,8 +34,8 @@ From a terminal, `heddle` can also launch the root Codex session directly; Studi
 | Location | Responsibility |
 | --- | --- |
 | `packages/core` | Agent/flow/role schemas; validation; legacy migration and notes; run/governance types |
-| `packages/runtime` | Flow loading, configured agents, resource selection, provider discovery and subagent process execution |
-| `packages/mcp` | Delegation JSON-RPC, tool definitions, async task state and governance RPCs |
+| `packages/runtime` | Flow loading, shared Codex session lifecycle and event parsing, resource selection, provider discovery and worker execution |
+| `packages/mcp` | Delegation JSON-RPC, authoritative in-process live task state, status events and governance RPCs |
 | `packages/cli` | `heddle` and `heddle-subagent` commands, Codex homes and launcher glue |
 | `apps/server` | Fastify endpoints, flow/resource CRUD, CLI launching, SSE and SQLite persistence |
 | `apps/studio` | Browser UI and client state |
@@ -48,21 +48,21 @@ The active schema is `packages/core/src/index.ts`. Agent type is `codex`. A flow
 
 Legacy `claude-code` inputs are migrated only through the exported core migration functions (also used by `packages/runtime/src/flow-loader.ts`). The caller may render migration notes using a shared core formatter; schema validation always follows conversion.
 
-`heddle mcp` exposes typed dynamic direct-child tools and stable delegation, status, report and cancellation tools. Workers produce structured REPORT text. Concurrent state still exists in more than one runtime surface and will be consolidated in v0.2.
+`heddle mcp` exposes typed direct-child tools, delegation/status/report/cancel APIs and governance tools. Workers produce structured REPORT text. Core lifecycle transitions are shared across MCP and server. MCP owns live task state; the server stores a read-only projection of task status events, and does not run a second task controller.
 
 ## Persistence and UI
 
-`apps/server/src/trace-store.ts` writes run records and events into `.heddle/traces.db` using `node:sqlite`. The server exposes APIs for running/cancelling, status, flow editing, resources, governance records and SSE events. Studio consumes these APIs; it does not directly execute Codex.
+`apps/server/src/trace-store.ts` writes run records and events into `.heddle/traces.db` using `node:sqlite`. Aborted runs become terminal before child termination, and late CLI status cannot overwrite them. In addition to existing run/event/SSE routes, `GET /runs/:id/tasks` returns the persisted worker status projection; Studio does not yet consume this endpoint.
 
 Role, hook and skill files are optional resources, not required for a basic two-worker flow. Hook commands, when configured, execute local shell commands and must be considered trusted input.
 
 ## Known technical debt
 
-- Leader and subagent each have their own Codex spawn/event-handling path in `packages/cli`; v0.2 should extract **one session engine** for both.
-- MCP tasks, CLI process lifecycle and server run records each own pieces of state; converge on one task lifecycle and cancellation contract.
+- One shared Codex session launcher is implemented in `packages/runtime/src/codex-session.ts`; an authenticated real-Codex leader/worker run has not yet been verified.
+- Live MCP task ownership and persistent server run records still run in different processes. Shared monotonic lifecycle rules and SQLite projection are in place, but durable cross-process recovery is not.
 - `apps/server/src/index.ts` combines API routing, governance and orchestration bookkeeping in a single large module.
 - The 450-line advanced example is inappropriate as a basic getting-started flow.
-- A mocked Codex golden-path test for leader -> delegation -> worker -> report -> UI update is still missing.
+- A simulated leader → actual MCP → fake worker → SQLite/SSE golden path now runs in CI; actual CLI/Studio and authenticated Codex end-to-end still need validation.
 - Packaging remains a multi-package pnpm workspace; reducing published surface requires a separate compatibility review.
 
 ## Security / compatibility
@@ -78,6 +78,7 @@ pnpm install --frozen-lockfile
 pnpm -r build
 pnpm -r typecheck
 pnpm -r test
+pnpm test:golden
 ```
 
 Linux and Windows CI are required before merging structural changes.

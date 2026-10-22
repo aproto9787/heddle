@@ -624,3 +624,6 @@ export function validateFlow(flow: FlowDefinition): string[] {
   errors.push(...validateAgentConfig(flow.orchestrator, "orchestrator"));
   return errors;
 }
+
+export { projectTaskStatuses, taskStatusEvent, transitionRunStatus, transitionTaskStatus, TASK_STATUS_TOOL } from "./lifecycle.js";
+export type { AgentTaskStatus, AgentTaskTerminalStatus, AgentTaskSnapshot } from "./lifecycle.js";
