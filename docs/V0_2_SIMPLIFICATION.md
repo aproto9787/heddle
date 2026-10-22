@@ -60,7 +60,7 @@ This describes the **target**, not the current implementation.
 
 These steps intentionally avoid changing public npm entry points, runtime ownership or permission behavior. Do **not** remove `apps/server/src/local-cli-runner.ts`: it is the live server-to-CLI launcher.
 
-## Stage 2 — Single execution owner (in progress, #24)
+## Stage 2 — Shared execution and lifecycle (in progress, #24 and #25)
 
 1. Define `RunRequest`, `AgentTask`, `RunEvent` and terminal states in the engine. Explicit owner for task IDs and cancellation.
 2. Extract Codex spawn/stream/report logic from both `packages/cli/src/index.ts` and `subagent-launcher.ts` into one tested engine module.
@@ -71,7 +71,9 @@ These steps intentionally avoid changing public npm entry points, runtime owners
 
 PR #24 extracts shared Codex command arguments, JSON stream framing/parsing, subprocess exit/cancel/timeout handling and routes interactive leaders, headless leaders and workers through that runtime. The MCP-created task ID is propagated to worker results, and cancelled task state cannot be overwritten by a late report. Unit tests and fake worker subprocess tests run on Linux/Windows.
 
-Still **not complete**: MCP/CLI/Studio run state ownership remains split, a full fake leader → real MCP → worker → persisted UI history golden path is missing, and authenticated sandboxed Codex end-to-end behavior has not been proven. This PR intentionally leaves the separate safety PR #20 unchanged.
+PR #25 builds on #24 with one core lifecycle transition contract for both delegated workers and whole runs. The live MCP task map emits best-effort task status events using the existing timeline protocol, and the Fastify API exposes a read-only SQLite-derived `GET /runs/:id/tasks` projection. Server-side abort now persists `aborted` before terminating the child, and late CLI completion cannot rewrite terminal run state. A simulated leader → actual MCP → fake worker process → SQLite/SSE integration test runs on Windows and Linux; it does **not** authenticate or invoke a real Codex model.
+
+Still **not complete**: MCP process state is authoritative only while the MCP process lives; SQLite is a persisted event projection rather than a distributed task controller. Studio has not yet adopted the new per-task read API, cross-process recovery remains open, and authenticated sandboxed Codex end-to-end behavior has not been verified. Security PR #20 must be reconciled after the launcher refactor.
 
 Do not merge until all old tests and new end-to-end tests pass. Preserve existing REST endpoints and CLI flags during the transition.
 
