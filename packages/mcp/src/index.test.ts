@@ -672,6 +672,12 @@ test("cancelled tasks cannot be overwritten by a late worker completion", async 
       params: { name: "heddle_get_status", arguments: { taskId } },
     });
     assert.equal(parseToolText(status).status, "cancelled");
+    const report = await server.handleRequest({
+      id: 46,
+      method: "tools/call",
+      params: { name: "heddle_read_report", arguments: { taskId } },
+    });
+    assert.equal(parseToolText(report).status, "cancelled");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
