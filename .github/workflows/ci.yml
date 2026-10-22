@@ -40,3 +40,7 @@ jobs:
         run: pnpm -r test
       - name: Golden-path integration
         run: pnpm test:golden
+      - name: Install pinned Codex CLI for parse-only smoke test
+        run: npm install -g @openai/codex@0.163.0
+      - name: Verify real Codex argument parser (no authentication)
+        run: pnpm test:codex-flags

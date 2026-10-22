@@ -1,25 +1,52 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import {
   codexArgs,
+  resolveCodexCommand,
   parseCodexStreamLine,
   startCodexSession,
 } from "./codex-session.js";
 
-test("all entrypoints share model fallback and Codex CLI argument rules", () => {
-  assert.deepEqual(codexArgs({ mode: "interactive" }), [
+test("interactive leaders request approval inside a workspace-write sandbox", () => {
+  assert.deepEqual(codexArgs({ mode: "interactive", env: {} }), [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", "on-request",
+  ]);
+  assert.deepEqual(codexArgs({ mode: "interactive", model: " current-model ", env: {} }), [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", "on-request",
+    "--model", "current-model",
+  ]);
+});
+
+test("headless leaders and workers put global security flags before exec", () => {
+  assert.deepEqual(codexArgs({ mode: "exec", prompt: "hello", env: {} }), [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", "never",
+    "exec", "--json", "--skip-git-repo-check", "hello",
+  ]);
+  assert.deepEqual(codexArgs({ mode: "exec", stdinPrompt: true, model: "test-model", env: {} }), [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", "never",
+    "exec", "--json", "--skip-git-repo-check", "--model", "test-model", "-",
+  ]);
+});
+
+test("unsafe bypass is available only via exact explicit opt-in", () => {
+  assert.deepEqual(codexArgs({ mode: "interactive", env: { HEDDLE_CODEX_UNSAFE: "1" } }), [
     "--dangerously-bypass-approvals-and-sandbox",
   ]);
-  assert.deepEqual(codexArgs({ mode: "interactive", model: " current-model " }), [
-    "--dangerously-bypass-approvals-and-sandbox", "--model", "current-model",
+  assert.deepEqual(codexArgs({ mode: "exec", prompt: "review", env: { HEDDLE_CODEX_UNSAFE: "1" } }), [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "exec", "--json", "--skip-git-repo-check", "review",
   ]);
-  assert.deepEqual(codexArgs({ mode: "exec", prompt: "hello" }), [
-    "exec", "--json", "--dangerously-bypass-approvals-and-sandbox",
-    "--skip-git-repo-check", "hello",
-  ]);
-  assert.deepEqual(codexArgs({ mode: "exec", stdinPrompt: true, model: "test-model" }), [
-    "exec", "--json", "--dangerously-bypass-approvals-and-sandbox",
-    "--skip-git-repo-check", "--model", "test-model", "-",
+  assert.deepEqual(codexArgs({ mode: "exec", prompt: "review", env: { HEDDLE_CODEX_UNSAFE: "true" } }), [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", "never",
+    "exec", "--json", "--skip-git-repo-check", "review",
   ]);
 });
 
@@ -133,4 +160,44 @@ test("spawn errors are surfaced instead of waiting for child termination", async
   const result = await session.finished;
   assert.ok(result.error);
   assert.notEqual(result.exitCode, 0);
+});
+
+test("Windows npm codex.cmd shim resolves to a safe Node launcher (no shell)", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "heddle-codex-shim-"));
+  try {
+    const js = path.join(dir, "node_modules", "@openai", "codex", "bin", "codex.js");
+    await mkdir(path.dirname(js), { recursive: true });
+    await writeFile(path.join(dir, "codex.cmd"), "@echo off\n");
+    await writeFile(js, "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n");
+    const argumentsWithShellChars = ["--model", "other model", "hello & echo hacked"];
+    const resolved = resolveCodexCommand("codex", argumentsWithShellChars, { PATH: dir }, "win32");
+    assert.equal(resolved.command, process.execPath);
+    assert.deepEqual(resolved.args, [js, ...argumentsWithShellChars]);
+    const session = startCodexSession({
+      command: resolved.command,
+      args: resolved.args,
+    });
+    const result = await session.finished;
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), argumentsWithShellChars);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Windows native codex.exe is preferred to npm shims", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "heddle-codex-native-"));
+  try {
+    const exe = path.join(dir, "codex.exe");
+    await writeFile(exe, "");
+    await writeFile(path.join(dir, "codex.cmd"), "");
+    const result = resolveCodexCommand("codex", ["--help"], { PATH: dir }, "win32");
+    assert.equal(result.command, exe);
+    assert.deepEqual(result.args, ["--help"]);
+    assert.deepEqual(resolveCodexCommand(process.execPath, ["-v"], { PATH: dir }, "win32"), {
+      command: process.execPath, args: ["-v"],
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

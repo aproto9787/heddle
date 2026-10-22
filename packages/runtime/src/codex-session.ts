@@ -1,4 +1,6 @@
 import { spawn, type StdioOptions } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 /** Shared lifecycle for interactive leaders, headless leaders and Codex workers. */
 export interface CodexSessionOptions {
@@ -34,25 +36,48 @@ export interface CodexSession {
 }
 
 /**
- * Build the same Codex CLI argument contract for all agent entrypoints.
- * The existing execution permissions are intentionally unchanged in this
- * refactor; the security-default change is tracked separately in PR #20.
+ * Heddle launches Codex with a workspace sandbox by default.
+ * These are Codex global flags: they must come before the 'exec' subcommand.
+ *
+ * HEDDLE_CODEX_UNSAFE=1 is a deliberate compatibility escape hatch only for
+ * separately isolated environments. Normal local sessions must not bypass
+ * approvals or the OS sandbox.
  */
+export interface CodexSecurityEnv {
+  HEDDLE_CODEX_UNSAFE?: string;
+}
+
+export function codexSecurityArgs(
+  interactive: boolean,
+  env: CodexSecurityEnv = process.env,
+): string[] {
+  if (env.HEDDLE_CODEX_UNSAFE === "1") {
+    return ["--dangerously-bypass-approvals-and-sandbox"];
+  }
+  return [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", interactive ? "on-request" : "never",
+  ];
+}
+
+/** One Codex invocation contract for leaders and delegated workers. */
 export function codexArgs(input: {
   mode: "interactive" | "exec";
   model?: string;
   prompt?: string;
   stdinPrompt?: boolean;
+  env?: CodexSecurityEnv;
 }): string[] {
   const model = input.model?.trim();
   const modelArgs = model ? ["--model", model] : [];
+  const security = codexSecurityArgs(input.mode === "interactive", input.env);
   if (input.mode === "interactive") {
-    return ["--dangerously-bypass-approvals-and-sandbox", ...modelArgs];
+    return [...security, ...modelArgs];
   }
   return [
+    ...security,
     "exec",
     "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
     "--skip-git-repo-check",
     ...modelArgs,
     input.stdinPrompt ? "-" : (input.prompt ?? ""),
@@ -124,6 +149,41 @@ export function parseCodexStreamLine(line: string, maxSummaryLength = 160): Code
   return event("tool_use", typeof item.summary === "string" ? item.summary : kind, kind);
 }
 
+/** Resolve the native Codex executable or the official npm Windows shim.
+ * Windows .cmd/.ps1 launchers cannot be safely spawned using shell:false.
+ * Never use shell:true: the Codex prompt is untrusted shell input.
+ */
+export function resolveCodexCommand(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[] } {
+  if (platform !== "win32" || (command !== "codex" && command !== "codex.cmd")) {
+    return { command, args };
+  }
+
+  const directories = (env.PATH ?? env.Path ?? "").split(";").filter(Boolean);
+  // Prefer an actual executable to any script/shim if present on PATH.
+  for (const dir of directories) {
+    const native = path.join(dir, "codex.exe");
+    if (existsSync(native)) return { command: native, args };
+  }
+  for (const dir of directories) {
+    if (!existsSync(path.join(dir, "codex.cmd"))) continue;
+    const launcherCandidates = [
+      path.join(dir, "node_modules", "@openai", "codex", "bin", "codex.js"),
+      path.resolve(dir, "..", "@openai", "codex", "bin", "codex.js"),
+    ];
+    for (const launcher of launcherCandidates) {
+      if (existsSync(launcher)) {
+        return { command: process.execPath, args: [launcher, ...args] };
+      }
+    }
+  }
+  return { command, args };
+}
+
 export function startCodexSession(options: CodexSessionOptions): CodexSession {
   let running = false;
   let stopped = false;
@@ -144,9 +204,11 @@ export function startCodexSession(options: CodexSessionOptions): CodexSession {
     return { finished, stop: () => undefined, cancel: () => undefined, isRunning: () => false };
   }
 
-  const child = spawn(options.command ?? "codex", options.args, {
+  const sessionEnv = options.env ?? process.env;
+  const executable = resolveCodexCommand(options.command ?? "codex", options.args, sessionEnv);
+  const child = spawn(executable.command, executable.args, {
     cwd: options.cwd,
-    env: options.env ?? process.env,
+    env: sessionEnv,
     stdio: options.stdio ?? ["ignore", "pipe", "pipe"],
   });
   running = true;
