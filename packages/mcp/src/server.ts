@@ -142,7 +142,7 @@ export class HeddleMcpServer {
         parentAgent: task.parentAgent,
       });
       const response = await fetch(
-        `${task.serverOrigin.replace(/\\/+$/, "")}/runs/${encodeURIComponent(task.runId)}/events`,
+        `${task.serverOrigin.replace(/[/]+$/, "")}/runs/${encodeURIComponent(task.runId)}/events`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
