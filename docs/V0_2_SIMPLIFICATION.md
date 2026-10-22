@@ -73,7 +73,11 @@ PR #24 extracts shared Codex command arguments, JSON stream framing/parsing, sub
 
 PR #25 builds on #24 with one core lifecycle transition contract for both delegated workers and whole runs. The live MCP task map emits best-effort task status events using the existing timeline protocol, and the Fastify API exposes a read-only SQLite-derived `GET /runs/:id/tasks` projection. Server-side abort now persists `aborted` before terminating the child, and late CLI completion cannot rewrite terminal run state. A simulated leader → actual MCP → fake worker process → SQLite/SSE integration test runs on Windows and Linux; it does **not** authenticate or invoke a real Codex model.
 
-Still **not complete**: MCP process state is authoritative only while the MCP process lives; SQLite is a persisted event projection rather than a distributed task controller. Studio has not yet adopted the new per-task read API, cross-process recovery remains open, and authenticated sandboxed Codex end-to-end behavior has not been verified. Security PR #20 must be reconciled after the launcher refactor.
+Draft PR #26 incorporates security PR #20's sandbox and approval defaults directly into the single shared session argument builder, adds a safe Windows npm Codex-shim resolver (no shell interpolation of prompts), and confirms Codex 0.163.0 argument parsing on both CI hosts. This is a **parse-only** check, not authentication or proof of sandbox enforcement.
+
+The stacked orphan-state reconciliation change returns `unknown` with `reason: parent_run_terminal` for worker tasks lacking a terminal event after the parent run ends or becomes stale. This is a **read-time-only projection**; it does not kill, resume, or modify a worker, and a genuine later completion still takes precedence. The test reconstructs persisted worker history using a fresh Fastify server instance.
+
+Still **not complete**: MCP process state is authoritative only while the MCP process lives; SQLite is a persisted event projection rather than a distributed task controller. Studio has not yet adopted the task read endpoint; resilient process adoption after restarts and authenticated sandboxed Codex end-to-end behavior remain outstanding. Keep security PR #20 open only as historical reference pending disposition of #26.
 
 Do not merge until all old tests and new end-to-end tests pass. Preserve existing REST endpoints and CLI flags during the transition.
 
