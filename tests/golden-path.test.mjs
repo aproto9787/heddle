@@ -66,10 +66,12 @@ test("simulated leader → MCP → worker subprocess → SQLite and SSE", { time
   const origin = await app.listen({ host: "127.0.0.1", port: 0 });
   const runId = "golden-" + Date.now();
   let reportPath;
+  let cancelledReportPath;
   t.after(async () => {
     await app.close();
     await rm(root, { recursive: true, force: true });
     if (reportPath) await rm(path.dirname(reportPath), { recursive: true, force: true });
+    if (cancelledReportPath) await rm(path.dirname(cancelledReportPath), { recursive: true, force: true });
   });
 
   const flowPath = path.join(root, "flow.yaml");
@@ -158,6 +160,49 @@ test("simulated leader → MCP → worker subprocess → SQLite and SSE", { time
   const events = await readStatusStream(sse, 2);
   assert.deepEqual(events.map((event) => event.raw.status).sort(), ["done", "running"]);
   assert.ok(events.every((event) => event.raw.taskId === task.taskId));
+
+  // Reuse the real MCP/HTTP/SQLite stack to prove cancellation stays terminal.
+  const hangWorkerPath = path.join(root, "fake-hang.cjs");
+  await writeFile(hangWorkerPath, "setInterval(() => {}, 1000);\n");
+  const cancellingMcp = new HeddleMcpServer({
+    env: {
+      HEDDLE_FLOW_PATH: flowPath,
+      HEDDLE_FLOW_CWD: root,
+      HEDDLE_AGENT: "leader",
+      HEDDLE_RUN_ID: runId,
+      HEDDLE_SERVER_ORIGIN: origin,
+      HEDDLE_SUBAGENT_BIN: hangWorkerPath,
+    },
+    delegateRunner: runSubagentTask,
+  });
+  const cancelStart = toolPayload(await cancellingMcp.handleRequest({
+    id: 3,
+    method: "tools/call",
+    params: { name: "heddle_delegate_reviewer", arguments: { briefing: "Long task" } },
+  }));
+  const cancelResponse = toolPayload(await cancellingMcp.handleRequest({
+    id: 4,
+    method: "tools/call",
+    params: { name: "heddle_cancel", arguments: { taskId: cancelStart.taskId } },
+  }));
+  assert.equal(cancelResponse.status, "cancelled");
+  const projectedCancel = await waitFor(async () => {
+    const data = await (await fetch(origin + "/runs/" + runId + "/tasks")).json();
+    return data.tasks.find((worker) =>
+      worker.taskId === cancelStart.taskId && worker.status === "cancelled"
+    );
+  }, "persistent cancelled worker");
+  assert.equal(projectedCancel.agent, "reviewer");
+  const stoppedWorker = await waitFor(async () => {
+    const data = toolPayload(await cancellingMcp.handleRequest({
+      id: 5,
+      method: "tools/call",
+      params: { name: "heddle_read_report", arguments: { taskId: cancelStart.taskId } },
+    }));
+    return data.result?.reportPath ? data : undefined;
+  }, "cancelled subprocess cleanup");
+  assert.equal(stoppedWorker.status, "cancelled");
+  cancelledReportPath = stoppedWorker.result.reportPath;
 
   const completed = await fetch(origin + "/runs/" + runId + "/status", {
     method: "PATCH",
