@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentConfig } from "@aproto9787/heddle-core";
+import type { AgentConfig, AgentTaskTerminalStatus } from "@aproto9787/heddle-core";
 import { startCodexSession } from "./codex-session.js";
 
 export type SubagentBackend = "codex";
@@ -33,7 +33,7 @@ export interface RunSubagentTaskOptions {
 export interface RunSubagentTaskResult {
   taskId: string;
   agent: string;
-  status: "done" | "blocked" | "needs_decision" | "error" | "cancelled" | "unknown";
+  status: AgentTaskTerminalStatus;
   exitCode: number;
   report: ParsedSubagentReport;
   reportPath: string;
