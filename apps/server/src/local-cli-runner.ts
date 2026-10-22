@@ -81,8 +81,8 @@ export function abortLocalCliRun(runId: string, onAbort?: () => void): boolean {
   if (!child) return false;
   // The mock path can run its exit callback synchronously during kill().
   // Persist 'aborted' before asking the child to terminate.
-  activeLocalCliRuns.delete(runId);
   onAbort?.();
+  activeLocalCliRuns.delete(runId);
   child.kill("SIGTERM");
   return true;
 }
