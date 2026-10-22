@@ -157,6 +157,10 @@ export class HeddleMcpServer {
     if (name === "heddle_read_report") {
       const { taskId } = parseReadReportArguments(args);
       const task = this.getTask(taskId);
+      // Never report a cancelled task as 'done' because its worker returned late.
+      if (task.status === "cancelled") {
+        return textResult({ taskId, agent: task.agent, status: "cancelled", result: task.result });
+      }
       return textResult(task.result ?? {
         taskId,
         agent: task.agent,
@@ -387,7 +391,9 @@ export class HeddleMcpServer {
       throw new Error(`agent must be one of the current direct children: ${childNames(children).join(", ") || "(none)"}`);
     }
     const controller = new AbortController();
+    const taskId = randomUUID();
     const promise = this.delegateRunner({
+      taskId,
       agent: target,
       parentAgent: context.currentAgentName,
       briefing: parsed.briefing,
@@ -400,7 +406,6 @@ export class HeddleMcpServer {
       timeoutSeconds: parsed.timeoutSeconds,
       signal: controller.signal,
     });
-    const taskId = randomUUID();
     const task: TaskState = {
       taskId,
       agent: target.name,
@@ -411,10 +416,12 @@ export class HeddleMcpServer {
     this.tasks.set(taskId, task);
     promise.then((result) => {
       task.result = result;
-      task.status = result.status;
+      if (task.status !== "cancelled") task.status = result.status;
     }).catch((error: unknown) => {
-      task.status = "error";
-      task.error = error instanceof Error ? error.message : String(error);
+      if (task.status !== "cancelled") {
+        task.status = "error";
+        task.error = error instanceof Error ? error.message : String(error);
+      }
     });
 
     if (!parsed.wait) {
@@ -430,7 +437,7 @@ export class HeddleMcpServer {
       };
     }
     task.result = result;
-    task.status = result.status;
+    if (task.status !== "cancelled") task.status = result.status;
     return result;
   }
 

@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AgentConfig } from "@aproto9787/heddle-core";
+import { startCodexSession } from "./codex-session.js";
 
 export type SubagentBackend = "codex";
 
@@ -17,6 +17,7 @@ export interface ParsedSubagentReport {
 
 export interface RunSubagentTaskOptions {
   agent: AgentConfig;
+  taskId?: string;
   parentAgent: string;
   briefing: string;
   flowPath: string;
@@ -85,7 +86,7 @@ export function parseSubagentReport(raw: string): ParsedSubagentReport {
 }
 
 export async function runSubagentTask(options: RunSubagentTaskOptions): Promise<RunSubagentTaskResult> {
-  const taskId = randomUUID();
+  const taskId = options.taskId ?? randomUUID();
   const reportDir = await mkdtemp(path.join(os.tmpdir(), "heddle-mcp-subagent-"));
   const reportPath = path.join(reportDir, `${options.agent.name}-${taskId}.txt`);
   await mkdir(reportDir, { recursive: true });
@@ -130,45 +131,16 @@ export async function runSubagentTask(options: RunSubagentTaskOptions): Promise<
     ...(options.serverOrigin ? { HEDDLE_SERVER_ORIGIN: options.serverOrigin } : {}),
   };
 
-  const { exitCode, stdout, stderr, cancelled } = await new Promise<{ exitCode: number; stdout: string; stderr: string; cancelled: boolean }>((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
-      cwd: options.cwd,
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let cancelled = false;
-    let exited = false;
-    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
-    const cleanupAbort = () => {
-      if (forceKillTimer) clearTimeout(forceKillTimer);
-      options.signal?.removeEventListener("abort", abortHandler);
-    };
-    const abortHandler = () => {
-      cancelled = true;
-      if (!exited) child.kill("SIGTERM");
-      forceKillTimer = setTimeout(() => {
-        if (!exited) child.kill("SIGKILL");
-      }, 5000);
-    };
-    options.signal?.addEventListener("abort", abortHandler, { once: true });
-    if (options.signal?.aborted) abortHandler();
-
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => { stdout += chunk; });
-    child.stderr?.on("data", (chunk: string) => { stderr += chunk; });
-    child.once("error", (error) => {
-      cleanupAbort();
-      reject(error);
-    });
-    child.once("exit", (code, signal) => {
-      exited = true;
-      cleanupAbort();
-      resolve({ exitCode: signal ? 1 : (code ?? 0), stdout, stderr, cancelled });
-    });
+  const session = startCodexSession({
+    command: process.execPath,
+    args,
+    cwd: options.cwd,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+    signal: options.signal,
   });
+  const { exitCode, stdout, stderr, cancelled, error } = await session.finished;
+  if (error) throw error;
 
   let reportRaw = stdout;
   try {

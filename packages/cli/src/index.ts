@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -13,9 +12,8 @@ import YAML from "yaml";
 import * as HeddleCore from "@aproto9787/heddle-core";
 import { formatLegacyMigrationNotes, type AgentConfig, type AgentType, type FlowDefinition, type TimelineEvent } from "@aproto9787/heddle-core";
 import { runHeddleMcpServer } from "@aproto9787/heddle-mcp";
-import { buildConfiguredAgent } from "@aproto9787/heddle-runtime";
+import { buildConfiguredAgent, codexArgs, parseCodexStreamLine, startCodexSession } from "@aproto9787/heddle-runtime";
 import { createCodexInstructionHome, type CodexInstructionHome } from "./codex-home.js";
-import { codexModelArgs } from "./codex-model-args.js";
 import { buildDelegationPrompt } from "./delegation-prompt.js";
 import { buildHeadlessPrompt } from "./session-prompts.js";
 
@@ -321,8 +319,7 @@ function logMigrationNotes(scope: string, notes: string[]): void {
 }
 
 function buildSpawnArgs(agent: AgentConfig): { command: string; args: string[] } {
-  const args = ["--dangerously-bypass-approvals-and-sandbox", ...codexModelArgs(agent.model)];
-  return { command: "codex", args };
+  return { command: "codex", args: codexArgs({ mode: "interactive", model: agent.model }) };
 }
 
 function quoteTomlString(value: string): string {
@@ -376,72 +373,19 @@ function getServerOrigin(explicitOrigin?: string): string {
   return explicitOrigin ?? process.env.HEDDLE_SERVER_ORIGIN ?? "http://localhost:8787";
 }
 
-function summarizeText(value: string | undefined, maxLength = 120): string | undefined {
-  const normalized = value?.replace(/\s+/g, " ").trim();
-  if (!normalized) return undefined;
-  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
-}
-
-function parseEventTimestamp(value: unknown): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return Date.now();
-}
-
-function extractMessageText(message: unknown): string | undefined {
-  if (typeof message === "string") return message;
-  if (Array.isArray(message)) {
-    return summarizeText(message.map((entry) => {
-      if (typeof entry === "string") return entry;
-      if (!entry || typeof entry !== "object") return "";
-      const typedEntry = entry as Record<string, unknown>;
-      return typeof typedEntry.text === "string" ? typedEntry.text : "";
-    }).filter(Boolean).join(" "));
-  }
-  return undefined;
-}
-
-function mapCodexHeadlessLine(runId: string, line: string, leaderName = "leader"): HeddleRunEvent | null {
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(line.trim()) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-  if (parsed.type !== "item.completed") return null;
-  const item = parsed.item;
-  if (!item || typeof item !== "object") return null;
-  const typedItem = item as Record<string, unknown>;
-  const itemType = typeof typedItem.type === "string" ? typedItem.type : undefined;
-  const ts = parseEventTimestamp(parsed.timestamp ?? parsed.ts);
-  if (itemType === "agent_message") {
-    const text = typeof typedItem.text === "string" ? typedItem.text : undefined;
-    const summary = summarizeText(text);
-    if (!summary) return null;
-    return { runId, ts, type: "assistant", summary, agentName: leaderName, agentDepth: 0, agentKind: "codex", raw: parsed };
-  }
-  if (itemType === "reasoning") {
-    const text = typeof typedItem.text === "string" ? typedItem.text : "reasoning";
-    return { runId, ts, type: "assistant", summary: summarizeText(`reasoning: ${text}`), toolName: "reasoning", agentName: leaderName, agentDepth: 0, agentKind: "codex", raw: parsed };
-  }
-  if (itemType === "command_execution") {
-    const command = typeof typedItem.command === "string" ? typedItem.command : "command";
-    return { runId, ts, type: "tool_use", summary: summarizeText(command), toolName: "Bash", agentName: leaderName, agentDepth: 0, agentKind: "codex", raw: parsed };
-  }
-  if (itemType === "file_change") {
-    const pathStr = typeof typedItem.path === "string" ? typedItem.path : "";
-    const op = typeof typedItem.operation === "string" ? typedItem.operation : "edit";
-    return { runId, ts, type: "tool_result", summary: summarizeText(`${op} ${pathStr}`), toolName: "Edit", agentName: leaderName, agentDepth: 0, agentKind: "codex", raw: parsed };
-  }
-  return { runId, ts, type: "tool_use", summary: summarizeText(itemType ?? "codex item"), toolName: itemType, agentName: leaderName, agentDepth: 0, agentKind: "codex", raw: parsed };
-}
-
 function mapHeadlessStdoutLine(runId: string, line: string, agentType: AgentType, leaderName = "leader"): HeddleRunEvent[] {
-  const mapped = mapCodexHeadlessLine(runId, line, leaderName);
-  return mapped ? [mapped] : [];
+  const event = parseCodexStreamLine(line, 120);
+  return event ? [{
+    runId,
+    ts: event.timestamp,
+    type: event.type,
+    summary: event.summary,
+    toolName: event.toolName,
+    agentName: leaderName,
+    agentDepth: 0,
+    agentKind: agentType,
+    raw: event.raw,
+  }] : [];
 }
 
 async function postRunEvents(origin: string, runId: string, events: HeddleRunEvent[]): Promise<void> {
@@ -538,15 +482,10 @@ function resolveAgentFlowMd(flow: LoadedCliFlow, agent: AgentConfig): string | u
 
 
 function buildHeadlessSpawnArgs(agent: AgentConfig, finalInstructions: string, userPrompt: string, mcpConfigPath?: string): { command: string; args: string[] } {
-  const args = [
-    "exec",
-    "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
-    "--skip-git-repo-check",
-    ...codexModelArgs(agent.model),
-  ];
-  args.push(buildHeadlessPrompt(finalInstructions, userPrompt));
-  return { command: "codex", args };
+  return {
+    command: "codex",
+    args: codexArgs({ mode: "exec", model: agent.model, prompt: buildHeadlessPrompt(finalInstructions, userPrompt) }),
+  };
 }
 
 async function runHeadlessAgent(
@@ -576,47 +515,30 @@ async function runHeadlessAgent(
     HEDDLE_SUBAGENT_BIN: fileURLToPath(new URL("./subagent-launcher.js", import.meta.url)),
   };
 
-  return await new Promise<number>((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: flowCwd,
-      stdio: ["ignore", "pipe", "inherit"],
-      env: childEnv,
-    });
-
-    let buffer = "";
-    const flushLine = (line: string) => {
+  const pendingEvents = new Set<Promise<void>>();
+  const session = startCodexSession({
+    command,
+    args,
+    cwd: flowCwd,
+    stdio: ["ignore", "pipe", "inherit"],
+    env: childEnv,
+    captureOutput: false,
+    onStdoutChunk: (chunk) => process.stdout.write(chunk),
+    onStdoutLine: (line) => {
       const events = mapHeadlessStdoutLine(registration.runId, line, configuredAgent.type, configuredAgent.name);
       if (events.length > 0) {
-        void registration.postEvents(events);
+        const pending = registration.postEvents(events);
+        pendingEvents.add(pending);
+        void pending.finally(() => pendingEvents.delete(pending));
       }
-    };
-    const flush = (chunk: string) => {
-      buffer += chunk;
-      let newlineIndex = buffer.indexOf("\n");
-      while (newlineIndex !== -1) {
-        const line = buffer.slice(0, newlineIndex).trim();
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line) flushLine(line);
-        newlineIndex = buffer.indexOf("\n");
-      }
-    };
-
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      process.stdout.write(chunk);
-      flush(chunk);
-    });
-    child.once("error", async (error) => {
-      await registration.cleanup(1).catch(() => undefined);
-      reject(error);
-    });
-    child.once("exit", async (code, signal) => {
-      if (buffer.trim()) flushLine(buffer.trim());
-      const resolvedCode = signal ? 1 : (code ?? 0);
-      await registration.cleanup(resolvedCode);
-      resolve(resolvedCode);
-    });
+    },
   });
+  const result = await session.finished;
+  // Flush mapped timeline events before recording the terminal run status.
+  await Promise.allSettled([...pendingEvents]);
+  await registration.cleanup(result.exitCode);
+  if (result.error) throw result.error;
+  return result.exitCode;
 }
 
 async function launchAgent(flow: LoadedCliFlow, options: CliOptions): Promise<number> {
@@ -697,7 +619,9 @@ async function launchAgent(flow: LoadedCliFlow, options: CliOptions): Promise<nu
     process.stdout.write("\x1b[?2004h"); // re-enable bracketed paste
   }
 
-  const child = spawn(command, args, {
+  const session = startCodexSession({
+    command,
+    args,
     cwd: flowCwd,
     stdio: "inherit",
     env: {
@@ -719,19 +643,12 @@ async function launchAgent(flow: LoadedCliFlow, options: CliOptions): Promise<nu
           }
         : {}),
     },
+    captureOutput: false,
   });
-
-  return await new Promise<number>((resolve, reject) => {
-    child.once("error", async (error) => {
-      await finalizeRun(1).catch(() => undefined);
-      reject(error);
-    });
-    child.once("exit", async (code, signal) => {
-      const resolvedCode = signal ? 1 : (code ?? 0);
-      await finalizeRun(resolvedCode);
-      resolve(resolvedCode);
-    });
-  });
+  const result = await session.finished;
+  await finalizeRun(result.exitCode);
+  if (result.error) throw result.error;
+  return result.exitCode;
 }
 
 function slugify(value: string): string {

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { HeddleMcpServer } from "./index.js";
-import type { RunSubagentTaskResult } from "@aproto9787/heddle-runtime";
+import { runSubagentTask, type RunSubagentTaskResult } from "@aproto9787/heddle-runtime";
 
 async function createTestFlow(): Promise<{ root: string; flowPath: string }> {
   const root = await mkdtemp(path.join(os.tmpdir(), "heddle-mcp-test-"));
@@ -598,6 +598,142 @@ test("heddle_cancel aborts a running async task", async () => {
     });
 
     assert.equal(parseToolText(cancelled).cancelled, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP delegation hands its task ID through to the worker result", async () => {
+  const { root, flowPath } = await createTestFlow();
+  try {
+    let runnerTaskId: string | undefined;
+    const server = new HeddleMcpServer({
+      env: {
+        HEDDLE_FLOW_PATH: flowPath,
+        HEDDLE_FLOW_CWD: root,
+        HEDDLE_AGENT: "leader",
+        HEDDLE_SUBAGENT_BIN: "/tmp/heddle-subagent.js",
+      },
+      delegateRunner: async (options) => {
+        runnerTaskId = options.taskId;
+        return { ...fakeResult(options.agent.name), taskId: options.taskId! };
+      },
+    });
+    const started = await server.handleRequest({
+      id: 41,
+      method: "tools/call",
+      params: { name: "heddle_delegate_reviewer", arguments: { briefing: "audit the patch" } },
+    });
+    const task = parseToolText(started);
+    assert.equal(runnerTaskId, task.taskId);
+    await new Promise((resolve) => setImmediate(resolve));
+    const report = await server.handleRequest({
+      id: 42,
+      method: "tools/call",
+      params: { name: "heddle_read_report", arguments: { taskId: task.taskId } },
+    });
+    assert.equal(parseToolText(report).taskId, task.taskId);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cancelled tasks cannot be overwritten by a late worker completion", async () => {
+  const { root, flowPath } = await createTestFlow();
+  try {
+    let finishRunner!: (value: RunSubagentTaskResult) => void;
+    const pending = new Promise<RunSubagentTaskResult>((resolve) => { finishRunner = resolve; });
+    const server = new HeddleMcpServer({
+      env: {
+        HEDDLE_FLOW_PATH: flowPath,
+        HEDDLE_FLOW_CWD: root,
+        HEDDLE_AGENT: "leader",
+        HEDDLE_SUBAGENT_BIN: "/tmp/heddle-subagent.js",
+      },
+      delegateRunner: async () => pending,
+    });
+    const response = await server.handleRequest({
+      id: 43,
+      method: "tools/call",
+      params: { name: "heddle_delegate_reviewer", arguments: { briefing: "work" } },
+    });
+    const { taskId } = parseToolText(response);
+    await server.handleRequest({
+      id: 44,
+      method: "tools/call",
+      params: { name: "heddle_cancel", arguments: { taskId } },
+    });
+    finishRunner(fakeResult("reviewer"));
+    await pending;
+    await new Promise((resolve) => setImmediate(resolve));
+    const status = await server.handleRequest({
+      id: 45,
+      method: "tools/call",
+      params: { name: "heddle_get_status", arguments: { taskId } },
+    });
+    assert.equal(parseToolText(status).status, "cancelled");
+    const report = await server.handleRequest({
+      id: 46,
+      method: "tools/call",
+      params: { name: "heddle_read_report", arguments: { taskId } },
+    });
+    assert.equal(parseToolText(report).status, "cancelled");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP delegates through the real process runner and collects a worker report", async () => {
+  const { root, flowPath } = await createTestFlow();
+  try {
+    const fakeWorker = path.join(root, "fake-worker.cjs");
+    await writeFile(fakeWorker, [
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "const get = (name) => args[args.indexOf(name) + 1];",
+      "const report = 'status: done\\nsummary:\\n  - worker reviewed changes\\n';",
+      "fs.writeFileSync(get('--report'), report);",
+      "process.stdout.write(report);",
+    ].join("\n"), "utf8");
+
+    const server = new HeddleMcpServer({
+      env: {
+        HEDDLE_FLOW_PATH: flowPath,
+        HEDDLE_FLOW_CWD: root,
+        HEDDLE_AGENT: "leader",
+        HEDDLE_SUBAGENT_BIN: fakeWorker,
+      },
+      delegateRunner: runSubagentTask,
+    });
+    const request = await server.handleRequest({
+      id: 51,
+      method: "tools/call",
+      params: { name: "heddle_delegate_reviewer", arguments: { briefing: "review this feature" } },
+    });
+    const { taskId } = parseToolText(request);
+    assert.equal(typeof taskId, "string");
+
+    let finished: Record<string, unknown> | undefined;
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const response = await server.handleRequest({
+        id: 52,
+        method: "tools/call",
+        params: { name: "heddle_read_report", arguments: { taskId } },
+      });
+      const result = parseToolText(response);
+      if (result.status !== "running") {
+        finished = result;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    assert.ok(finished, "worker report should complete within the test deadline");
+    assert.equal(finished.taskId, taskId);
+    assert.equal(finished.status, "done");
+    const report = finished.report as { summary: string[] };
+    assert.deepEqual(report.summary, ["worker reviewed changes"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
