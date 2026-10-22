@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { HeddleMcpServer } from "./index.js";
-import type { RunSubagentTaskResult } from "@aproto9787/heddle-runtime";
+import { runSubagentTask, type RunSubagentTaskResult } from "@aproto9787/heddle-runtime";
 
 async function createTestFlow(): Promise<{ root: string; flowPath: string }> {
   const root = await mkdtemp(path.join(os.tmpdir(), "heddle-mcp-test-"));
@@ -678,6 +678,62 @@ test("cancelled tasks cannot be overwritten by a late worker completion", async 
       params: { name: "heddle_read_report", arguments: { taskId } },
     });
     assert.equal(parseToolText(report).status, "cancelled");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("MCP delegates through the real process runner and collects a worker report", async () => {
+  const { root, flowPath } = await createTestFlow();
+  try {
+    const fakeWorker = path.join(root, "fake-worker.cjs");
+    await writeFile(fakeWorker, [
+      "const fs = require('node:fs');",
+      "const args = process.argv.slice(2);",
+      "const get = (name) => args[args.indexOf(name) + 1];",
+      "const report = 'status: done\\nsummary:\\n  - worker reviewed changes\\n';",
+      "fs.writeFileSync(get('--report'), report);",
+      "process.stdout.write(report);",
+    ].join("\n"), "utf8");
+
+    const server = new HeddleMcpServer({
+      env: {
+        HEDDLE_FLOW_PATH: flowPath,
+        HEDDLE_FLOW_CWD: root,
+        HEDDLE_AGENT: "leader",
+        HEDDLE_SUBAGENT_BIN: fakeWorker,
+      },
+      delegateRunner: runSubagentTask,
+    });
+    const request = await server.handleRequest({
+      id: 51,
+      method: "tools/call",
+      params: { name: "heddle_delegate_reviewer", arguments: { briefing: "review this feature" } },
+    });
+    const { taskId } = parseToolText(request);
+    assert.equal(typeof taskId, "string");
+
+    let finished: Record<string, unknown> | undefined;
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const response = await server.handleRequest({
+        id: 52,
+        method: "tools/call",
+        params: { name: "heddle_read_report", arguments: { taskId } },
+      });
+      const result = parseToolText(response);
+      if (result.status !== "running") {
+        finished = result;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    assert.ok(finished, "worker report should complete within the test deadline");
+    assert.equal(finished.taskId, taskId);
+    assert.equal(finished.status, "done");
+    const report = finished.report as { summary: string[] };
+    assert.deepEqual(report.summary, ["worker reviewed changes"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
