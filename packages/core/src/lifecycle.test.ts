@@ -32,3 +32,24 @@ test("task projection ignores unrelated or malformed run events", () => {
     e,
   ]), [{ taskId: "t1", agent: "implementer", status: "done", parentAgent: undefined }]);
 });
+
+test("finished parent runs expose unresolved worker status as unknown, not success", () => {
+  const running = taskStatusEvent("r1", {
+    taskId: "orphan", agent: "reviewer", status: "running", parentAgent: "leader",
+  }, 1);
+  assert.equal(projectTaskStatuses([running], "running")[0]?.status, "running");
+  assert.deepEqual(projectTaskStatuses([running], "stale"), [{
+    taskId: "orphan", agent: "reviewer", status: "unknown",
+    parentAgent: "leader", reason: "parent_run_terminal",
+  }]);
+  assert.equal(projectTaskStatuses([running], "aborted")[0]?.status, "unknown");
+  assert.equal(projectTaskStatuses([running], "done")[0]?.status, "unknown");
+
+  // Projection is read-only, so an authentic late completion still wins.
+  const completed = taskStatusEvent("r1", {
+    taskId: "orphan", agent: "reviewer", status: "done",
+  }, 2);
+  assert.deepEqual(projectTaskStatuses([running, completed], "done"), [{
+    taskId: "orphan", agent: "reviewer", status: "done", parentAgent: "leader",
+  }]);
+});
