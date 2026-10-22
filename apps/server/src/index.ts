@@ -8,6 +8,7 @@ import YAML from "yaml";
 import {
   approvalRecordSchema,
   flowSchema,
+  projectTaskStatuses,
   formatLegacyMigrationNotes,
   migrateLegacyFlowDefinitionInput as migrateCoreFlow,
   migrateLegacyRoleDefinitionInput as migrateCoreRole,
@@ -630,7 +631,13 @@ export function buildServer() {
       return reply.code(400).send({ error: flattenValidationError(parsed.error) });
     }
 
-    const aborted = abortLocalCliRun(parsed.data.id);
+    const aborted = abortLocalCliRun(parsed.data.id, () => {
+      updateRunRecord(parsed.data.id, {
+        status: "aborted",
+        exitCode: 1,
+        endedAt: new Date().toISOString(),
+      });
+    });
     if (!aborted) {
       return reply.code(404).send({ error: { message: "run not found" } });
     }
@@ -801,6 +808,22 @@ export function buildServer() {
       runId: params.data.id,
       hasGovernance: manifestState.hasGovernance,
       manifest: manifestState.manifest,
+    });
+  });
+
+  // Persistent, read-only projection of the MCP-owned live task lifecycle.
+  // The existing timeline event format remains unchanged for older clients.
+  app.get("/runs/:id/tasks", async (request, reply) => {
+    const params = runParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send({ error: flattenValidationError(params.error) });
+    }
+    if (!getRun(params.data.id)) {
+      return reply.code(404).send({ error: { message: "run not found" } });
+    }
+    return reply.code(200).send({
+      runId: params.data.id,
+      tasks: projectTaskStatuses(listRunEvents(params.data.id)),
     });
   });
 
