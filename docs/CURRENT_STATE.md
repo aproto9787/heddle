@@ -52,7 +52,7 @@ Do not document these as implemented unless the code changes first:
 - `capabilities` field in flow or role YAML.
 - Cost, latency, throughput, or token-meter UI.
 - DAG node execution, typed edge routing, loop/join/control nodes, or general graph runtime.
-- Automated golden-path test coverage for leader → workers.
+- Authenticated Codex leader → MCP → worker integration tests with sandbox/approval checks (the current golden-path test uses a simulated leader and fake workers).
 
 ## What is implemented
 
@@ -76,24 +76,28 @@ Do not document these as implemented unless the code changes first:
 - Role/hook/skill YAML CRUD.
 - MCP/resource discovery and selected MCP config generation.
 - SQLite run/event persistence under `.heddle/traces.db`.
+- Shared Codex subprocess/event lifecycle in `packages/runtime/src/codex-session.ts` for interactive leaders, headless leaders and workers.
+- Monotonic run and task terminal statuses from `packages/core/src/lifecycle.ts`, so late completion cannot overwrite cancellation.
+- MCP-authored task state events and a read-only `GET /runs/:id/tasks` projection of SQLite timeline events; Studio integration is still pending.
+- Simulated leader/MCP/fake-worker/SQLite/SSE golden-path test on Linux and Windows.
 - Risk-tier governance schemas, governance event persistence, reconstructed run manifests, and Studio run-detail governance panels.
 - MCP governance tools for gate records, manifest updates, approvals, and rollback records.
 - Tier C+ side-effect gate enforcement that blocks pass records until approval and rollback evidence exist.
 
-## Active runtime split
+## Active runtime ownership
 
-The active execution path is CLI-driven. `apps/server/src/local-cli-runner.ts` launches the CLI for server-initiated runs. `packages/cli/src/index.ts` launches the Codex leader, `packages/mcp` handles delegation tools and task status, and `packages/cli/src/subagent-launcher.ts` handles delegated child execution. `packages/runtime` supplies shared loaders, prompts and subprocess helpers. `apps/server/src/trace-store.ts` persists events.
+The active execution path is CLI-driven. `apps/server/src/local-cli-runner.ts` still spawns the CLI for server-initiated runs, while `packages/cli/src/index.ts` and `subagent-launcher.ts` both execute Codex through the single `packages/runtime/src/codex-session.ts` session lifecycle. `packages/mcp` owns live delegate task state and emits best-effort status events; `apps/server/src/trace-store.ts` persists run state and events to SQLite. The read-only `GET /runs/:id/tasks` endpoint projects the worker states without starting a second live controller.
 
-The redundant server-side `runner*.ts` façade modules and the unused private `packages/adapters` workspace package have been removed. No replacement runtime is shipped in this cleanup. A single Codex session engine is a planned **future** change under [V0_2_SIMPLIFICATION.md](V0_2_SIMPLIFICATION.md).
+The redundant server `runner*.ts` façades and private `packages/adapters` package are gone. The first common session-engine slice is Draft PR #24; the state/SSE integration is stacked Draft PR #25. Neither is assumed merged merely because these docs live on their branch. Full cross-process task recovery and authenticated sandboxed Codex checks remain open.
 
 ## Safe wording for docs
 
 Use wording like:
 
-> Heddle currently runs recursive YAML-defined Codex agent teams using a CLI leader, MCP delegation and child Codex processes.
+> On the v0.2 refactor branch, Heddle runs Codex leaders and workers through a common session lifecycle, with MCP-owned task states projected into SQLite for inspection.
 
 Avoid wording like:
 
-> Heddle already has one unified execution engine, generic graph orchestration or proven end-to-end sandbox enforcement.
+> Heddle has fully unified cross-process task ownership, generic graph orchestration, or proven authenticated sandbox enforcement.
 
 Those would overstate the current implementation.
