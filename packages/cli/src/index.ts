@@ -515,6 +515,7 @@ async function runHeadlessAgent(
     HEDDLE_SUBAGENT_BIN: fileURLToPath(new URL("./subagent-launcher.js", import.meta.url)),
   };
 
+  const pendingEvents = new Set<Promise<void>>();
   const session = startCodexSession({
     command,
     args,
@@ -525,10 +526,16 @@ async function runHeadlessAgent(
     onStdoutChunk: (chunk) => process.stdout.write(chunk),
     onStdoutLine: (line) => {
       const events = mapHeadlessStdoutLine(registration.runId, line, configuredAgent.type, configuredAgent.name);
-      if (events.length > 0) void registration.postEvents(events);
+      if (events.length > 0) {
+        const pending = registration.postEvents(events);
+        pendingEvents.add(pending);
+        void pending.finally(() => pendingEvents.delete(pending));
+      }
     },
   });
   const result = await session.finished;
+  // Flush mapped timeline events before recording the terminal run status.
+  await Promise.allSettled([...pendingEvents]);
   await registration.cleanup(result.exitCode);
   if (result.error) throw result.error;
   return result.exitCode;
