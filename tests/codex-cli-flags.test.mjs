@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
-import { codexArgs } from "../packages/runtime/dist/index.js";
+import { codexArgs, resolveCodexCommand } from "../packages/runtime/dist/index.js";
 
 /** Parse-only smoke: checks the real CLI parser, no account, network or model call. */
 test("Codex 0.163.0 accepts Heddle's sandbox and approval argument ordering", () => {
@@ -23,7 +23,8 @@ test("Codex 0.163.0 accepts Heddle's sandbox and approval argument ordering", ()
     },
   ];
   for (const item of cases) {
-    const result = spawnSync("codex", [...item.args, "--help"], {
+    const resolved = resolveCodexCommand("codex", [...item.args, "--help"]);
+    const result = spawnSync(resolved.command, resolved.args, {
       encoding: "utf8",
       timeout: 20_000,
       windowsHide: true,
