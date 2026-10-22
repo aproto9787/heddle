@@ -50,17 +50,17 @@ Studio (optional)  CLI
 
 This describes the **target**, not the current implementation.
 
-## Stage 1 — Remove no-op layers (this PR)
+## Stage 1 — Remove no-op layers (merged in #21)
 
 - [x] Delete the unused private `packages/adapters` package and stale TypeScript references.
 - [x] Delete redundant server `runner*.ts` re-export façades; tests import the canonical runtime package.
 - [x] Replace server/CLI/subagent legacy migration fallbacks with one `core` migration function and formatter.
 - [x] Add a minimal two-worker flow without requiring role, team, governance, hook or skill boilerplate.
-- [ ] Validate frozen pnpm installation, workspace build, typecheck and tests on Linux/Windows in CI.
+- [x] Validate frozen pnpm installation, workspace build, typecheck and tests on Linux/Windows in CI.
 
 These steps intentionally avoid changing public npm entry points, runtime ownership or permission behavior. Do **not** remove `apps/server/src/local-cli-runner.ts`: it is the live server-to-CLI launcher.
 
-## Stage 2 — Single execution owner (separate PR)
+## Stage 2 — Single execution owner (in progress, #24)
 
 1. Define `RunRequest`, `AgentTask`, `RunEvent` and terminal states in the engine. Explicit owner for task IDs and cancellation.
 2. Extract Codex spawn/stream/report logic from both `packages/cli/src/index.ts` and `subagent-launcher.ts` into one tested engine module.
@@ -68,6 +68,10 @@ These steps intentionally avoid changing public npm entry points, runtime owners
 4. Make MCP `delegate/get_status/read_report/cancel` operate on the engine task table.
 5. Reduce the Fastify server to API, persistent storage and SSE. Remove obsolete compatibility runners **only after** real callers and tests move.
 6. Add mocked Codex golden-path tests for leader → worker → report, cancellation, timeout and crash recovery. Verify behavior on Windows.
+
+PR #24 extracts shared Codex command arguments, JSON stream framing/parsing, subprocess exit/cancel/timeout handling and routes interactive leaders, headless leaders and workers through that runtime. The MCP-created task ID is propagated to worker results, and cancelled task state cannot be overwritten by a late report. Unit tests and fake worker subprocess tests run on Linux/Windows.
+
+Still **not complete**: MCP/CLI/Studio run state ownership remains split, a full fake leader → real MCP → worker → persisted UI history golden path is missing, and authenticated sandboxed Codex end-to-end behavior has not been proven. This PR intentionally leaves the separate safety PR #20 unchanged.
 
 Do not merge until all old tests and new end-to-end tests pass. Preserve existing REST endpoints and CLI flags during the transition.
 
