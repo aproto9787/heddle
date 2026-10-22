@@ -6,20 +6,43 @@ import {
   startCodexSession,
 } from "./codex-session.js";
 
-test("all entrypoints share model fallback and Codex CLI argument rules", () => {
-  assert.deepEqual(codexArgs({ mode: "interactive" }), [
+test("interactive leaders request approval inside a workspace-write sandbox", () => {
+  assert.deepEqual(codexArgs({ mode: "interactive", env: {} }), [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", "on-request",
+  ]);
+  assert.deepEqual(codexArgs({ mode: "interactive", model: " current-model ", env: {} }), [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", "on-request",
+    "--model", "current-model",
+  ]);
+});
+
+test("headless leaders and workers put global security flags before exec", () => {
+  assert.deepEqual(codexArgs({ mode: "exec", prompt: "hello", env: {} }), [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", "never",
+    "exec", "--json", "--skip-git-repo-check", "hello",
+  ]);
+  assert.deepEqual(codexArgs({ mode: "exec", stdinPrompt: true, model: "test-model", env: {} }), [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", "never",
+    "exec", "--json", "--skip-git-repo-check", "--model", "test-model", "-",
+  ]);
+});
+
+test("unsafe bypass is available only via exact explicit opt-in", () => {
+  assert.deepEqual(codexArgs({ mode: "interactive", env: { HEDDLE_CODEX_UNSAFE: "1" } }), [
     "--dangerously-bypass-approvals-and-sandbox",
   ]);
-  assert.deepEqual(codexArgs({ mode: "interactive", model: " current-model " }), [
-    "--dangerously-bypass-approvals-and-sandbox", "--model", "current-model",
+  assert.deepEqual(codexArgs({ mode: "exec", prompt: "review", env: { HEDDLE_CODEX_UNSAFE: "1" } }), [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "exec", "--json", "--skip-git-repo-check", "review",
   ]);
-  assert.deepEqual(codexArgs({ mode: "exec", prompt: "hello" }), [
-    "exec", "--json", "--dangerously-bypass-approvals-and-sandbox",
-    "--skip-git-repo-check", "hello",
-  ]);
-  assert.deepEqual(codexArgs({ mode: "exec", stdinPrompt: true, model: "test-model" }), [
-    "exec", "--json", "--dangerously-bypass-approvals-and-sandbox",
-    "--skip-git-repo-check", "--model", "test-model", "-",
+  assert.deepEqual(codexArgs({ mode: "exec", prompt: "review", env: { HEDDLE_CODEX_UNSAFE: "true" } }), [
+    "--sandbox", "workspace-write",
+    "--ask-for-approval", "never",
+    "exec", "--json", "--skip-git-repo-check", "review",
   ]);
 });
 
